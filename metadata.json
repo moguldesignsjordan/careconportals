@@ -1,0 +1,8 @@
+{
+  "name": "Care General Construction Portal",
+  "description": "A comprehensive project management dashboard for Care General Construction, featuring dedicated portals for Clients, Contractors, and Admins to track progress and communicate.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}

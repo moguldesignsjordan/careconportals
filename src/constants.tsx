@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { User, Project, UserRole, ProjectStatus, Document } from './types';
 
@@ -25,17 +24,14 @@ export const MOCK_DOCUMENTS: Document[] = [
 ];
 
 export const Logo = ({ light = false, compact = false }: { light?: boolean, compact?: boolean }) => (
-  <div className="flex items-center gap-3">
-    <div className={`relative ${compact ? 'w-10 h-10' : 'w-12 h-12'} ${light ? 'bg-white' : 'bg-[#F15A2B]'} rounded-xl flex items-center justify-center shadow-lg shadow-black/10 transition-all`}>
-        <svg viewBox="0 0 24 24" className={`${compact ? 'w-6 h-6' : 'w-7 h-7'} ${light ? 'text-[#F15A2B]' : 'text-white'} fill-current`}>
-          <path d="M12 3L4 9V21H20V9L12 3ZM12 17.5C10.5 17.5 9 16.5 9 15C9 14.1 9.4 13.5 10 13C10.6 12.5 11 11.9 11 11H13C13 11.9 13.4 12.5 14 13C14.6 13.5 15 14.1 15 15C15 16.5 13.5 17.5 12 17.5Z" />
-        </svg>
-    </div>
-    {!compact && (
-      <div className="flex flex-col leading-[1.1]">
-        <span className={`text-2xl font-black tracking-tighter uppercase ${light ? 'text-white' : 'text-[#1A1A1A]'}`}>Care</span>
-        <span className={`text-[11px] uppercase font-bold tracking-widest ${light ? 'text-white/70' : 'text-gray-500'}`}>Construction</span>
-      </div>
-    )}
+  <div className="flex items-center gap-4">
+    {/* UPDATED: Using care.png from public folder instead of SVG */}
+    <img 
+      src="/care.png" 
+      alt="Care General Construction" 
+      className={`${compact ? 'w-20 h-20' : 'w-20 h-20'} object-contain`}
+    />
+    
+
   </div>
 );

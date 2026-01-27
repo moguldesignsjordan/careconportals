@@ -2,7 +2,7 @@
 import React from 'react';
 import { LayoutDashboard, Briefcase, MessageSquare, Settings, LogOut, Users, FileText, X, Calendar } from 'lucide-react';
 import { User, UserRole } from '../types';
-import { Logo } from '../constants';
+import { Logo } from "../constants";
 
 interface SidebarProps {
   user: User;

@@ -1,15 +1,20 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+/// <reference types="vite/client" />
 import { 
   signInWithPopup, 
   signInWithEmailAndPassword, 
   createUserWithEmailAndPassword, 
   signOut, 
-  onAuthStateChanged,
-  User as FirebaseUser
+  onAuthStateChanged
 } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { auth, googleProvider, db } from "../lib/firebase";
-import { User, UserRole } from '../types'; // Ensure path is correct
+import { User as BaseUser, UserRole } from '../types'; // Import your existing base type
+
+// Extend the imported User type to include the company property
+interface User extends BaseUser {
+  company?: string;
+}
 
 interface AuthContextType {
   user: User | null;
@@ -36,9 +41,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
         if (userSnap.exists()) {
           setUser({ id: currentUser.uid, ...userSnap.data() } as User);
-        } else {
-          // If user exists in Auth but not DB (rare edge case for Google Login without role), handle nicely
-          // For now, we assume Google Login handles the creation
         }
       } else {
         setUser(null);
@@ -63,6 +65,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           email: result.user.email || '',
           role: selectedRole,
           avatar: result.user.photoURL || 'https://via.placeholder.com/150',
+          // Fix: The 'company' property is now recognized by our extended interface
           company: selectedRole === UserRole.CONTRACTOR ? 'Freelance' : undefined
         };
         await setDoc(userRef, newUser);
@@ -76,7 +79,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const loginWithEmail = async (email: string, pass: string) => {
     await signInWithEmailAndPassword(auth, email, pass);
-    // onAuthStateChanged handles the rest
   };
 
   const signupWithEmail = async (email: string, pass: string, name: string, role: UserRole) => {

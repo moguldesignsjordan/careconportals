@@ -259,7 +259,7 @@ const App: React.FC = () => {
   // Loading state
   if (authLoading) {
     return (
-      <div className="h-screen bg-[#FDEEE9] flex items-center justify-center">
+      <div className="h-screen bg-white flex items-center justify-center">
         <div className="text-center">
           <Loader2
             size={48}
@@ -423,9 +423,9 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="h-screen bg-[#FDEEE9] flex overflow-hidden">
+    <div className="h-screen bg-white flex overflow-hidden">
       {/* Mobile header */}
-      <div className="lg:hidden fixed top-0 left-0 right-0 h-16 bg-white border-b border-[#FDEEE9] flex items-center justify-between px-4 z-40">
+      <div className="lg:hidden fixed top-0 left-0 right-0 h-16 bg-white border-b border-gray-200 flex items-center justify-between px-4 z-40">
         <button
           onClick={() => setSidebarOpen(true)}
           className="p-2 rounded-xl hover:bg-care-orange/10 transition-colors"

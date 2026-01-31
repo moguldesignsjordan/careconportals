@@ -1,6 +1,5 @@
-
-import React, { useState } from 'react';
-import { X, Briefcase, User as UserIcon, Calendar, DollarSign, AlignLeft } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { X, Briefcase, User as UserIcon, Calendar, DollarSign, AlignLeft, Loader2 } from 'lucide-react';
 import { User, UserRole, ProjectStatus, Project } from '../types';
 
 interface CreateProjectModalProps {
@@ -9,7 +8,7 @@ interface CreateProjectModalProps {
   clients: User[];
   contractors: User[];
   currentUser: User;
-  onCreate: (project: Omit<Project, 'id' | 'updates'>) => void;
+  onCreate: (project: Omit<Project, 'id' | 'updates' | 'createdAt'>) => Promise<void>;
 }
 
 const CreateProjectModal: React.FC<CreateProjectModalProps> = ({ 
@@ -20,6 +19,8 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
   currentUser,
   onCreate 
 }) => {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [formData, setFormData] = useState({
     title: '',
     description: '',
@@ -30,36 +31,67 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
     estimatedEndDate: '',
   });
 
+  // Reset form when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      setFormData({
+        title: '',
+        description: '',
+        clientId: '',
+        contractorId: currentUser.role === UserRole.CONTRACTOR ? currentUser.id : '',
+        budget: '',
+        startDate: new Date().toISOString().split('T')[0],
+        estimatedEndDate: '',
+      });
+      setError(null);
+    }
+  }, [isOpen, currentUser]);
+
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.title || !formData.clientId || !formData.estimatedEndDate) return;
+    setError(null);
 
-    onCreate({
-      title: formData.title,
-      description: formData.description,
-      status: ProjectStatus.PLANNING,
-      progress: 0,
-      clientId: formData.clientId,
-      contractorId: formData.contractorId || currentUser.id,
-      startDate: formData.startDate,
-      estimatedEndDate: formData.estimatedEndDate,
-      budget: Number(formData.budget) || 0,
-      spent: 0,
-    });
-    
-    // Reset and close
-    setFormData({
-      title: '',
-      description: '',
-      clientId: '',
-      contractorId: currentUser.role === UserRole.CONTRACTOR ? currentUser.id : '',
-      budget: '',
-      startDate: new Date().toISOString().split('T')[0],
-      estimatedEndDate: '',
-    });
-    onClose();
+    // Validation
+    if (!formData.title.trim()) {
+      setError('Project title is required');
+      return;
+    }
+    if (!formData.clientId) {
+      setError('Please select a client');
+      return;
+    }
+    if (!formData.estimatedEndDate) {
+      setError('End date is required');
+      return;
+    }
+    if (!formData.contractorId && currentUser.role !== UserRole.CONTRACTOR) {
+      setError('Please assign a contractor');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      await onCreate({
+        title: formData.title.trim(),
+        description: formData.description.trim(),
+        status: ProjectStatus.PLANNING,
+        progress: 0,
+        clientId: formData.clientId,
+        contractorId: formData.contractorId || currentUser.id,
+        startDate: formData.startDate,
+        estimatedEndDate: formData.estimatedEndDate,
+        budget: Number(formData.budget) || 0,
+        spent: 0,
+      });
+      
+      onClose();
+    } catch (err: any) {
+      setError(err.message || 'Failed to create project');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -83,9 +115,15 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
         </div>
 
         <form onSubmit={handleSubmit} className="p-8 space-y-6">
+          {error && (
+            <div className="bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-xl text-sm font-medium">
+              {error}
+            </div>
+          )}
+
           <div className="space-y-4">
             <div>
-              <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">Project Title</label>
+              <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">Project Title *</label>
               <div className="relative">
                 <AlignLeft className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
                 <input
@@ -112,12 +150,12 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
 
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">Link Client</label>
+                <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">Link Client *</label>
                 <div className="relative">
                   <UserIcon className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
                   <select
                     required
-                    className="w-full pl-10 pr-4 py-3 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-care-orange focus:ring-0 transition-all text-sm font-bold appearance-none"
+                    className="w-full pl-10 pr-4 py-3 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-care-orange focus:ring-0 transition-all text-sm font-bold appearance-none cursor-pointer"
                     value={formData.clientId}
                     onChange={e => setFormData({ ...formData, clientId: e.target.value })}
                   >
@@ -127,6 +165,9 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
                     ))}
                   </select>
                 </div>
+                {clients.length === 0 && (
+                  <p className="text-xs text-amber-600 mt-1">No clients available. Add a client first.</p>
+                )}
               </div>
 
               <div>
@@ -135,7 +176,7 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
                   <UserIcon className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
                   <select
                     disabled={currentUser.role === UserRole.CONTRACTOR}
-                    className="w-full pl-10 pr-4 py-3 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-care-orange focus:ring-0 transition-all text-sm font-bold appearance-none disabled:opacity-60"
+                    className="w-full pl-10 pr-4 py-3 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-care-orange focus:ring-0 transition-all text-sm font-bold appearance-none disabled:opacity-60 cursor-pointer"
                     value={formData.contractorId}
                     onChange={e => setFormData({ ...formData, contractorId: e.target.value })}
                   >
@@ -148,14 +189,15 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-3 gap-4">
               <div>
                 <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">Budget ($)</label>
                 <div className="relative">
                   <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
                   <input
                     type="number"
-                    placeholder="Total Budget"
+                    placeholder="50000"
+                    min="0"
                     className="w-full pl-10 pr-4 py-3 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-care-orange focus:ring-0 transition-all text-sm font-bold"
                     value={formData.budget}
                     onChange={e => setFormData({ ...formData, budget: e.target.value })}
@@ -164,7 +206,20 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
               </div>
 
               <div>
-                <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">Est. Completion Date</label>
+                <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">Start Date</label>
+                <div className="relative">
+                  <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                  <input
+                    type="date"
+                    className="w-full pl-10 pr-4 py-3 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-care-orange focus:ring-0 transition-all text-sm font-bold"
+                    value={formData.startDate}
+                    onChange={e => setFormData({ ...formData, startDate: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">End Date *</label>
                 <div className="relative">
                   <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
                   <input
@@ -179,12 +234,29 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
             </div>
           </div>
 
-          <button 
-            type="submit"
-            className="w-full bg-care-orange text-white py-4 rounded-xl font-black uppercase tracking-widest hover:shadow-xl hover:shadow-care-orange/20 transition-all active:scale-[0.98]"
-          >
-            Launch Project
-          </button>
+          <div className="flex gap-3 pt-4">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 py-3 px-6 border-2 border-gray-200 rounded-xl font-black uppercase tracking-widest text-xs text-gray-600 hover:bg-gray-50 transition-all"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={loading || clients.length === 0}
+              className="flex-1 py-3 px-6 bg-care-orange text-white rounded-xl font-black uppercase tracking-widest text-xs hover:shadow-lg hover:shadow-care-orange/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            >
+              {loading ? (
+                <>
+                  <Loader2 size={16} className="animate-spin" />
+                  Creating...
+                </>
+              ) : (
+                'Launch Project'
+              )}
+            </button>
+          </div>
         </form>
       </div>
     </div>

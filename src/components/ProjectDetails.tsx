@@ -1,163 +1,313 @@
-
 import React, { useState } from 'react';
 import { Project, ProjectStatus, User, UserRole } from '../types';
-import { ChevronLeft, MessageSquare, Camera, CheckCircle, Clock, User as UserIcon, Calendar, ArrowUpRight } from 'lucide-react';
+import { 
+  ChevronLeft, MessageSquare, Camera, CheckCircle, Clock, 
+  User as UserIcon, Calendar, DollarSign, Edit3, Send, Loader2
+} from 'lucide-react';
 
 interface ProjectDetailsProps {
   project: Project;
-  user: User;
+  currentUser: User;
+  users: User[];
   onBack: () => void;
-  onUpdateStatus: (projectId: string, status: ProjectStatus, progress: number) => void;
-  onAddUpdate: (projectId: string, content: string) => void;
-  onContactLead: (leadId: string) => void;
+  onUpdateStatus: (projectId: string, status: ProjectStatus, progress: number) => Promise<void>;
+  onAddUpdate: (projectId: string, content: string) => Promise<void>;
+  onMessage: (user: User) => void;
 }
 
-const ProjectDetails: React.FC<ProjectDetailsProps> = ({ project, user, onBack, onUpdateStatus, onAddUpdate, onContactLead }) => {
+const ProjectDetails: React.FC<ProjectDetailsProps> = ({ 
+  project, 
+  currentUser, 
+  users,
+  onBack, 
+  onUpdateStatus, 
+  onAddUpdate, 
+  onMessage 
+}) => {
   const [newUpdate, setNewUpdate] = useState('');
-  const canEdit = user.role === UserRole.CONTRACTOR || user.role === UserRole.ADMIN;
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [isPostingUpdate, setIsPostingUpdate] = useState(false);
+  const [editMode, setEditMode] = useState(false);
+  const [tempProgress, setTempProgress] = useState(project.progress);
+  const [tempStatus, setTempStatus] = useState(project.status);
 
-  const handleSubmitUpdate = (e: React.FormEvent) => {
+  const canEdit = currentUser.role === UserRole.CONTRACTOR || currentUser.role === UserRole.ADMIN;
+
+  const client = users.find(u => u.id === project.clientId);
+  const contractor = users.find(u => u.id === project.contractorId);
+
+  const handleSubmitUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (newUpdate.trim()) {
-      onAddUpdate(project.id, newUpdate);
+    if (!newUpdate.trim() || isPostingUpdate) return;
+    
+    setIsPostingUpdate(true);
+    try {
+      await onAddUpdate(project.id, newUpdate);
       setNewUpdate('');
+    } finally {
+      setIsPostingUpdate(false);
+    }
+  };
+
+  const handleSaveStatus = async () => {
+    if (isUpdating) return;
+    setIsUpdating(true);
+    try {
+      await onUpdateStatus(project.id, tempStatus, tempProgress);
+      setEditMode(false);
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  const statusOptions = Object.values(ProjectStatus);
+
+  const getStatusColor = (status: ProjectStatus) => {
+    switch (status) {
+      case ProjectStatus.PLANNING: return 'bg-blue-100 text-blue-700';
+      case ProjectStatus.DEMOLITION: return 'bg-red-100 text-red-700';
+      case ProjectStatus.ROUGH_IN: return 'bg-purple-100 text-purple-700';
+      case ProjectStatus.FINISHING: return 'bg-orange-100 text-orange-700';
+      case ProjectStatus.COMPLETED: return 'bg-green-100 text-green-700';
+      case ProjectStatus.ON_HOLD: return 'bg-gray-100 text-gray-700';
+      default: return 'bg-gray-100 text-gray-700';
     }
   };
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6 md:space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-24">
-      <div className="flex items-center justify-between">
-        <button 
-          onClick={onBack}
-          className="flex items-center gap-2 text-gray-500 hover:text-care-orange transition-all font-black uppercase tracking-widest text-[10px]"
-        >
-          <ChevronLeft size={18} />
-          Back to Dashboard
-        </button>
-        <div className="flex gap-2">
-           <button className="p-2.5 bg-gray-100 rounded-xl text-gray-400 hover:text-care-orange hover:bg-care-orange/5 transition-all"><ArrowUpRight size={18} /></button>
+    <div className="max-w-5xl mx-auto space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-24">
+      {/* Back Button */}
+      <button 
+        onClick={onBack}
+        className="flex items-center gap-2 text-gray-500 hover:text-care-orange transition-all font-bold text-sm"
+      >
+        <ChevronLeft size={18} />
+        Back to Dashboard
+      </button>
+
+      {/* Main Card */}
+      <div className="bg-white rounded-3xl shadow-xl border border-gray-100 overflow-hidden">
+        {/* Header */}
+        <div className="bg-[#1A1A1A] p-8 text-white relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-64 h-64 bg-care-orange/10 rounded-full blur-3xl -mr-32 -mt-32"></div>
+          <div className="relative z-10">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div>
+                <h1 className="text-2xl md:text-3xl font-black mb-2">{project.title}</h1>
+                <p className="text-gray-400">{project.description || 'No description provided'}</p>
+              </div>
+              <span className={`self-start px-4 py-2 rounded-full text-sm font-black uppercase tracking-wider ${getStatusColor(project.status)}`}>
+                {project.status}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Progress Section */}
+        <div className="p-8 border-b border-gray-100">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest">Project Progress</h3>
+            {canEdit && !editMode && (
+              <button 
+                onClick={() => setEditMode(true)}
+                className="text-care-orange hover:text-orange-600 font-bold text-sm flex items-center gap-1"
+              >
+                <Edit3 size={14} />
+                Edit
+              </button>
+            )}
+          </div>
+
+          {editMode ? (
+            <div className="space-y-4 bg-gray-50 p-4 rounded-xl">
+              <div>
+                <label className="text-xs font-bold text-gray-500 mb-2 block">Status</label>
+                <select
+                  value={tempStatus}
+                  onChange={(e) => setTempStatus(e.target.value as ProjectStatus)}
+                  className="w-full p-3 border border-gray-200 rounded-xl font-bold"
+                >
+                  {statusOptions.map(s => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-bold text-gray-500 mb-2 block">Progress: {tempProgress}%</label>
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={tempProgress}
+                  onChange={(e) => setTempProgress(Number(e.target.value))}
+                  className="w-full accent-care-orange"
+                />
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => {
+                    setEditMode(false);
+                    setTempProgress(project.progress);
+                    setTempStatus(project.status);
+                  }}
+                  className="flex-1 py-2 border border-gray-200 rounded-xl font-bold text-gray-600"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSaveStatus}
+                  disabled={isUpdating}
+                  className="flex-1 py-2 bg-care-orange text-white rounded-xl font-bold flex items-center justify-center gap-2"
+                >
+                  {isUpdating ? <Loader2 size={16} className="animate-spin" /> : 'Save Changes'}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="flex justify-between items-end mb-2">
+                <span className="text-3xl font-black text-care-orange">{project.progress}%</span>
+              </div>
+              <div className="w-full h-4 bg-gray-100 rounded-full overflow-hidden">
+                <div 
+                  className="h-full bg-gradient-to-r from-care-orange to-orange-400 rounded-full transition-all duration-500" 
+                  style={{ width: `${project.progress}%` }}
+                />
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Details Grid */}
+        <div className="p-8 grid grid-cols-2 md:grid-cols-4 gap-6">
+          <div className="text-center p-4 bg-gray-50 rounded-xl">
+            <Calendar className="mx-auto mb-2 text-gray-400" size={20} />
+            <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Start Date</p>
+            <p className="font-bold mt-1">{new Date(project.startDate).toLocaleDateString()}</p>
+          </div>
+          <div className="text-center p-4 bg-gray-50 rounded-xl">
+            <Clock className="mx-auto mb-2 text-gray-400" size={20} />
+            <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">End Date</p>
+            <p className="font-bold mt-1">{new Date(project.estimatedEndDate).toLocaleDateString()}</p>
+          </div>
+          <div className="text-center p-4 bg-gray-50 rounded-xl">
+            <DollarSign className="mx-auto mb-2 text-gray-400" size={20} />
+            <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Budget</p>
+            <p className="font-bold mt-1">${(project.budget || 0).toLocaleString()}</p>
+          </div>
+          <div className="text-center p-4 bg-gray-50 rounded-xl">
+            <DollarSign className="mx-auto mb-2 text-gray-400" size={20} />
+            <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Spent</p>
+            <p className="font-bold mt-1">${(project.spent || 0).toLocaleString()}</p>
+          </div>
+        </div>
+
+        {/* Team Section */}
+        <div className="p-8 border-t border-gray-100">
+          <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest mb-4">Project Team</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {client && (
+              <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-xl">
+                <img src={client.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(client.name)}&background=F15A2B&color=fff`} alt={client.name} className="w-12 h-12 rounded-xl object-cover" />
+                <div className="flex-1">
+                  <p className="font-bold">{client.name}</p>
+                  <p className="text-xs text-gray-500">Client</p>
+                </div>
+                <button 
+                  onClick={() => onMessage(client)}
+                  className="p-2 text-care-orange hover:bg-care-orange/10 rounded-lg transition-all"
+                >
+                  <MessageSquare size={18} />
+                </button>
+              </div>
+            )}
+            {contractor && (
+              <div className="flex items-center gap-4 p-4 bg-gray-50 rounded-xl">
+                <img src={contractor.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(contractor.name)}&background=F15A2B&color=fff`} alt={contractor.name} className="w-12 h-12 rounded-xl object-cover" />
+                <div className="flex-1">
+                  <p className="font-bold">{contractor.name}</p>
+                  <p className="text-xs text-gray-500">Contractor • {contractor.specialty || 'General'}</p>
+                </div>
+                <button 
+                  onClick={() => onMessage(contractor)}
+                  className="p-2 text-care-orange hover:bg-care-orange/10 rounded-lg transition-all"
+                >
+                  <MessageSquare size={18} />
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
-      <div className="bg-white rounded-[2.5rem] shadow-2xl shadow-black/5 border border-gray-100 overflow-hidden">
-        <div className="bg-[#1A1A1A] p-6 md:p-10 text-white relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-64 h-64 bg-care-orange/10 rounded-full blur-3xl -mr-32 -mt-32"></div>
-          <div className="relative z-10 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
-            <div className="space-y-3">
-              <div className="flex items-center gap-2">
-                <span className="w-2 h-2 bg-care-orange rounded-full animate-pulse"></span>
-                <span className="text-[10px] font-black uppercase tracking-[0.3em] text-care-orange">Site Live</span>
-              </div>
-              <h1 className="text-3xl md:text-4xl font-black uppercase tracking-tight">{project.title}</h1>
-              <p className="text-white/50 text-sm md:text-base font-medium max-w-2xl leading-relaxed">{project.description}</p>
-            </div>
-            <div className="bg-white/10 backdrop-blur-md p-6 rounded-3xl border border-white/10 text-center min-w-[140px] w-full md:w-auto">
-              <p className="text-[10px] text-white/40 uppercase font-black tracking-widest mb-2">Stage</p>
-              <p className="text-xl font-black text-care-orange uppercase tracking-tight">{project.status}</p>
-            </div>
-          </div>
+      {/* Updates Section */}
+      <div className="bg-white rounded-3xl shadow-xl border border-gray-100 overflow-hidden">
+        <div className="p-8 border-b border-gray-100">
+          <h3 className="text-lg font-black">Site Updates</h3>
         </div>
 
-        <div className="p-6 md:p-10">
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-10 lg:gap-16">
-            <div className="lg:col-span-2 space-y-12">
-              <section>
-                <div className="flex justify-between items-center mb-8">
-                  <h2 className="text-xl font-black uppercase tracking-tight">Timeline & Progress</h2>
-                  {canEdit && (
-                    <button className="bg-gray-50 text-gray-400 hover:text-care-orange p-3 rounded-2xl transition-all border border-gray-100 flex items-center gap-2 text-[10px] font-black uppercase tracking-widest">
-                      <Camera size={16} /> Attach Media
-                    </button>
-                  )}
+        {/* Post Update Form */}
+        {canEdit && (
+          <form onSubmit={handleSubmitUpdate} className="p-6 border-b border-gray-100 bg-gray-50">
+            <div className="flex gap-3">
+              <img 
+                src={currentUser.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(currentUser.name)}&background=F15A2B&color=fff`} 
+                alt={currentUser.name}
+                className="w-10 h-10 rounded-xl object-cover shrink-0"
+              />
+              <div className="flex-1">
+                <textarea
+                  value={newUpdate}
+                  onChange={(e) => setNewUpdate(e.target.value)}
+                  placeholder="Post a site update..."
+                  rows={2}
+                  className="w-full p-3 border border-gray-200 rounded-xl resize-none focus:border-care-orange focus:ring-0 transition-all"
+                />
+                <div className="flex justify-end mt-2">
+                  <button
+                    type="submit"
+                    disabled={!newUpdate.trim() || isPostingUpdate}
+                    className="bg-care-orange text-white px-4 py-2 rounded-xl font-bold text-sm flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {isPostingUpdate ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
+                    Post Update
+                  </button>
                 </div>
-
-                <div className="space-y-8 relative before:absolute before:left-[11px] before:top-2 before:bottom-0 before:w-[2px] before:bg-gray-100/50">
-                  {project.updates.map((update, idx) => (
-                    <div key={idx} className="relative pl-10 group">
-                      <div className="absolute left-0 top-1.5 w-[24px] h-[24px] bg-white border-4 border-care-orange rounded-full z-10 shadow-[0_0_10px_rgba(241,90,43,0.2)]"></div>
-                      <div className="bg-gray-50/50 p-6 rounded-3xl border border-gray-100 group-hover:bg-white group-hover:border-care-orange/20 group-hover:shadow-xl transition-all duration-300">
-                        <div className="flex justify-between items-center mb-4">
-                          <div className="flex items-center gap-2">
-                             <div className="w-8 h-8 rounded-lg bg-care-orange/10 flex items-center justify-center text-care-orange font-black text-xs">{update.author[0]}</div>
-                             <span className="text-[11px] font-black uppercase tracking-widest text-gray-900">{update.author}</span>
-                          </div>
-                          <span className="text-[9px] font-black text-gray-300 uppercase tracking-widest">{new Date(update.timestamp).toLocaleDateString()}</span>
-                        </div>
-                        <p className="text-sm text-gray-600 leading-relaxed font-medium">{update.content}</p>
-                        {update.imageUrl && (
-                          <div className="mt-6 rounded-2xl overflow-hidden border border-gray-100 shadow-sm">
-                            <img src={update.imageUrl} alt="Update" className="w-full h-56 object-cover hover:scale-105 transition-transform duration-700" />
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-
-                  {canEdit && (
-                    <div className="relative pl-10">
-                      <div className="absolute left-0 top-1.5 w-[24px] h-[24px] bg-care-orange rounded-full z-10 flex items-center justify-center shadow-lg shadow-care-orange/20">
-                        <UserIcon size={12} className="text-white" />
-                      </div>
-                      <form onSubmit={handleSubmitUpdate} className="bg-white p-6 rounded-3xl border-2 border-dashed border-gray-200 focus-within:border-care-orange transition-colors">
-                        <textarea
-                          placeholder="Log site progress or blockers..."
-                          className="w-full bg-transparent border-none focus:ring-0 text-sm font-medium text-gray-700 placeholder-gray-300 resize-none"
-                          rows={3}
-                          value={newUpdate}
-                          onChange={(e) => setNewUpdate(e.target.value)}
-                        />
-                        <div className="flex justify-end mt-4">
-                          <button type="submit" className="bg-care-orange text-white px-8 py-3 rounded-2xl font-black uppercase tracking-widest text-[10px] hover:shadow-xl hover:shadow-care-orange/20 transition-all active:scale-95">Post Log</button>
-                        </div>
-                      </form>
-                    </div>
-                  )}
-                </div>
-              </section>
+              </div>
             </div>
+          </form>
+        )}
 
-            <div className="space-y-8">
-              <section className="bg-gray-50/50 p-8 rounded-[2rem] border border-gray-100 space-y-8">
-                <div className="space-y-4">
-                   <h3 className="font-black text-gray-900 uppercase text-[10px] tracking-[0.3em]">Build Progress</h3>
-                   <div className="relative pt-1">
-                      <div className="flex items-end justify-between mb-3">
-                        <span className="text-3xl font-black text-care-orange">{project.progress}<span className="text-sm">%</span></span>
-                        <span className="text-[10px] font-black uppercase text-gray-400 tracking-widest">{project.status}</span>
-                      </div>
-                      <div className="h-4 bg-gray-200 rounded-full overflow-hidden shadow-inner">
-                        <div style={{ width: `${project.progress}%` }} className="h-full bg-care-orange rounded-full shadow-[0_0_10px_rgba(241,90,43,0.3)] transition-all duration-1000"></div>
-                      </div>
-                   </div>
-                </div>
-
-                <div className="space-y-6 pt-6 border-t border-gray-100">
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-care-orange shadow-sm border border-gray-50"><Calendar size={20} /></div>
-                    <div>
-                      <p className="text-[9px] text-gray-400 font-black uppercase tracking-[0.2em]">Handoff Target</p>
-                      <p className="font-black text-gray-900 text-sm">{new Date(project.estimatedEndDate).toLocaleDateString(undefined, { month: 'long', day: 'numeric', year: 'numeric' })}</p>
-                    </div>
+        {/* Updates List */}
+        <div className="divide-y divide-gray-100">
+          {project.updates && project.updates.length > 0 ? (
+            [...project.updates].reverse().map((update) => (
+              <div key={update.id} className="p-6">
+                <div className="flex gap-4">
+                  <div className="w-10 h-10 bg-care-orange/10 rounded-xl flex items-center justify-center text-care-orange shrink-0">
+                    <UserIcon size={18} />
                   </div>
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center text-care-orange shadow-sm border border-gray-50"><UserIcon size={20} /></div>
-                    <div>
-                      <p className="text-[9px] text-gray-400 font-black uppercase tracking-[0.2em]">Site Lead</p>
-                      <p className="font-black text-gray-900 text-sm">John Smith</p>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="font-bold">{update.author}</span>
+                      <span className="text-xs text-gray-400">
+                        {new Date(update.timestamp).toLocaleDateString()} at {new Date(update.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
                     </div>
+                    <p className="text-gray-600">{update.content}</p>
+                    {update.imageUrl && (
+                      <img src={update.imageUrl} alt="Update" className="mt-3 rounded-xl max-w-md" />
+                    )}
                   </div>
                 </div>
-              </section>
-
-              <button 
-                onClick={() => onContactLead(project.contractorId)}
-                className="w-full bg-[#1A1A1A] text-white p-5 rounded-3xl flex items-center justify-center gap-3 font-black uppercase tracking-widest text-[11px] hover:bg-care-orange transition-all group shadow-xl shadow-black/5"
-              >
-                <MessageSquare size={20} className="text-care-orange group-hover:text-white transition-colors" />
-                Contact Site Lead
-              </button>
+              </div>
+            ))
+          ) : (
+            <div className="p-12 text-center text-gray-400">
+              <Camera size={40} className="mx-auto mb-3 opacity-30" />
+              <p>No updates yet</p>
             </div>
-          </div>
+          )}
         </div>
       </div>
     </div>

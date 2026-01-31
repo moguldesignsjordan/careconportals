@@ -1,4 +1,3 @@
-
 export enum UserRole {
   ADMIN = 'ADMIN',
   CONTRACTOR = 'CONTRACTOR',
@@ -16,6 +15,8 @@ export interface User {
   experience?: string;
   bio?: string;
   location?: string;
+  company?: string;
+  createdAt?: string;
 }
 
 export enum ProjectStatus {
@@ -48,13 +49,14 @@ export interface Project {
   budget: number;
   spent: number;
   updates: ProjectUpdate[];
+  createdAt?: string;
 }
 
 export interface Message {
   id: string;
   senderId: string;
   receiverId: string;
-  projectId: string;
+  projectId?: string;
   content: string;
   timestamp: string;
 }
@@ -64,6 +66,7 @@ export interface Document {
   title: string;
   fileName: string;
   fileSize: string;
+  fileUrl?: string;
   uploadedBy: string;
   uploadedAt: string;
   projectId?: string;

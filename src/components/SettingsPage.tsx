@@ -1,166 +1,348 @@
+import React, { useState, useRef } from 'react';
+import { useAuth } from '../context/AuthContext';
+import { uploadProfileImage } from '../services/db';
+import { Camera, Save, Loader2, User, Mail, Phone, MapPin, Briefcase, FileText, Clock, AlertCircle, CheckCircle } from 'lucide-react';
 
-import React, { useState } from 'react';
-import { User, UserRole } from '../types';
-// Added Award to the list of icons imported from lucide-react
-import { User as UserIcon, Mail, Phone, MapPin, Briefcase, Info, Save, Camera, Award } from 'lucide-react';
+const SettingsPage: React.FC = () => {
+  const { user, updateUserProfile } = useAuth();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  
+  const [loading, setSaving] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [success, setSuccess] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  
+  const [formData, setFormData] = useState({
+    name: user?.name || '',
+    email: user?.email || '',
+    phone: user?.phone || '',
+    location: user?.location || '',
+    company: user?.company || '',
+    specialty: user?.specialty || '',
+    experience: user?.experience || '',
+    bio: user?.bio || '',
+  });
 
-interface SettingsPageProps {
-  user: User;
-  onUpdateUser: (updatedUser: User) => void;
-}
+  if (!user) return null;
 
-const SettingsPage: React.FC<SettingsPageProps> = ({ user, onUpdateUser }) => {
-  const [formData, setFormData] = useState({ ...user });
-  const [isSaved, setIsSaved] = useState(false);
+  const handleImageClick = () => {
+    fileInputRef.current?.click();
+  };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      setError('Please select an image file');
+      return;
+    }
+
+    // Validate file size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      setError('Image must be less than 5MB');
+      return;
+    }
+
+    setUploadingImage(true);
+    setError(null);
+
+    try {
+      const avatarUrl = await uploadProfileImage(user.id, file);
+      await updateUserProfile({ avatar: avatarUrl });
+      setSuccess(true);
+      setTimeout(() => setSuccess(false), 3000);
+    } catch (err: any) {
+      setError(err.message || 'Failed to upload image');
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    onUpdateUser(formData);
-    setIsSaved(true);
-    setTimeout(() => setIsSaved(false), 3000);
+    setSaving(true);
+    setError(null);
+    setSuccess(false);
+
+    try {
+      await updateUserProfile({
+        name: formData.name.trim(),
+        phone: formData.phone.trim(),
+        location: formData.location.trim(),
+        company: formData.company.trim(),
+        specialty: formData.specialty.trim(),
+        experience: formData.experience.trim(),
+        bio: formData.bio.trim(),
+      });
+      setSuccess(true);
+      setTimeout(() => setSuccess(false), 3000);
+    } catch (err: any) {
+      setError(err.message || 'Failed to save changes');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
-    <div className="max-w-4xl mx-auto animate-in fade-in duration-500 space-y-12">
-      <header>
-        <h1 className="text-2xl font-black text-gray-900 uppercase tracking-tight">Account Settings</h1>
-        <p className="text-gray-500 font-medium">Update your profile and professional information.</p>
+    <div className="max-w-3xl mx-auto pb-20 animate-in fade-in duration-500">
+      <header className="mb-8">
+        <h1 className="text-2xl font-black text-gray-900">Settings</h1>
+        <p className="text-gray-500 font-medium">Manage your profile and preferences</p>
       </header>
 
-      <form onSubmit={handleSubmit} className="space-y-8">
-        <div className="bg-white p-8 md:p-12 rounded-[2.5rem] shadow-sm border border-gray-100">
-          <div className="flex flex-col md:flex-row gap-12">
-            {/* Avatar Section */}
-            <div className="flex flex-col items-center space-y-4">
-               <div className="relative group">
-                  <img 
-                    src={formData.avatar} 
-                    alt={formData.name} 
-                    className="w-32 h-32 rounded-[2rem] object-cover border-4 border-gray-50 group-hover:opacity-75 transition-opacity" 
-                  />
-                  <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer">
-                    <Camera className="text-white drop-shadow-lg" size={32} />
+      {/* Profile Card */}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden mb-8">
+        <div className="bg-gradient-to-r from-care-orange to-orange-500 h-24 relative">
+          <div className="absolute -bottom-12 left-8">
+            <div className="relative">
+              <div 
+                onClick={handleImageClick}
+                className="w-24 h-24 rounded-2xl bg-white border-4 border-white shadow-lg overflow-hidden cursor-pointer group"
+              >
+                {uploadingImage ? (
+                  <div className="w-full h-full flex items-center justify-center bg-gray-100">
+                    <Loader2 size={24} className="animate-spin text-care-orange" />
                   </div>
-               </div>
-               <p className="text-[10px] font-black uppercase tracking-widest text-gray-400">Profile Photo</p>
+                ) : (
+                  <>
+                    <img 
+                      src={user.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(user.name)}&background=F15A2B&color=fff`}
+                      alt={user.name}
+                      className="w-full h-full object-cover"
+                    />
+                    <div className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+                      <Camera size={24} className="text-white" />
+                    </div>
+                  </>
+                )}
+              </div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handleImageChange}
+                className="hidden"
+              />
+            </div>
+          </div>
+        </div>
+        
+        <div className="pt-16 px-8 pb-6">
+          <div className="flex items-start justify-between">
+            <div>
+              <h2 className="text-xl font-black text-gray-900">{user.name}</h2>
+              <p className="text-gray-500 text-sm">{user.email}</p>
+            </div>
+            <span className={`
+              px-3 py-1.5 rounded-full text-xs font-black uppercase tracking-widest
+              ${user.role === 'ADMIN' ? 'bg-purple-100 text-purple-600' : ''}
+              ${user.role === 'CONTRACTOR' ? 'bg-orange-100 text-care-orange' : ''}
+              ${user.role === 'CLIENT' ? 'bg-green-100 text-green-600' : ''}
+            `}>
+              {user.role}
+            </span>
+          </div>
+          {user.createdAt && (
+            <div className="mt-4 flex items-center gap-2 text-sm text-gray-400">
+              <Clock size={14} />
+              Member since {new Date(user.createdAt).toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Alerts */}
+      {error && (
+        <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl flex items-center gap-3 text-red-600 animate-in slide-in-from-top">
+          <AlertCircle size={20} />
+          <span className="text-sm font-medium">{error}</span>
+        </div>
+      )}
+
+      {success && (
+        <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-xl flex items-center gap-3 text-green-600 animate-in slide-in-from-top">
+          <CheckCircle size={20} />
+          <span className="text-sm font-medium">Changes saved successfully!</span>
+        </div>
+      )}
+
+      {/* Profile Form */}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8">
+        <h3 className="text-sm font-black text-gray-400 uppercase tracking-widest mb-6">Profile Information</h3>
+        
+        <form onSubmit={handleSubmit} className="space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+              <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">
+                Full Name
+              </label>
+              <div className="relative">
+                <User className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                <input
+                  type="text"
+                  className="w-full pl-10 pr-4 py-3 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-care-orange focus:ring-0 transition-all text-sm font-medium"
+                  value={formData.name}
+                  onChange={e => setFormData({ ...formData, name: e.target.value })}
+                />
+              </div>
             </div>
 
-            {/* Fields Grid */}
-            <div className="flex-1 space-y-8">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">Full Name</label>
-                  <div className="relative">
-                    <UserIcon className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-300" size={18} />
-                    <input
-                      type="text"
-                      className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-100 rounded-xl focus:border-care-orange focus:ring-0 transition-all font-bold text-gray-700"
-                      value={formData.name}
-                      onChange={e => setFormData({ ...formData, name: e.target.value })}
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">Email Address</label>
-                  <div className="relative">
-                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-300" size={18} />
-                    <input
-                      type="email"
-                      className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-100 rounded-xl focus:border-care-orange focus:ring-0 transition-all font-bold text-gray-700"
-                      value={formData.email}
-                      onChange={e => setFormData({ ...formData, email: e.target.value })}
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">Phone Number</label>
-                  <div className="relative">
-                    <Phone className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-300" size={18} />
-                    <input
-                      type="text"
-                      className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-100 rounded-xl focus:border-care-orange focus:ring-0 transition-all font-bold text-gray-700"
-                      value={formData.phone || ''}
-                      onChange={e => setFormData({ ...formData, phone: e.target.value })}
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">Location</label>
-                  <div className="relative">
-                    <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-300" size={18} />
-                    <input
-                      type="text"
-                      className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-100 rounded-xl focus:border-care-orange focus:ring-0 transition-all font-bold text-gray-700"
-                      value={formData.location || ''}
-                      onChange={e => setFormData({ ...formData, location: e.target.value })}
-                    />
-                  </div>
-                </div>
+            <div>
+              <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">
+                Email Address
+              </label>
+              <div className="relative">
+                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                <input
+                  type="email"
+                  disabled
+                  className="w-full pl-10 pr-4 py-3 bg-gray-100 border-2 border-gray-100 rounded-xl text-sm font-medium text-gray-500 cursor-not-allowed"
+                  value={formData.email}
+                />
               </div>
+              <p className="text-xs text-gray-400 mt-1">Email cannot be changed</p>
+            </div>
 
-              {user.role === UserRole.CONTRACTOR && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-6 border-t border-gray-50">
-                  <div>
-                    <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">Specialty</label>
-                    <div className="relative">
-                      <Briefcase className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-300" size={18} />
-                      <input
-                        type="text"
-                        className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-100 rounded-xl focus:border-care-orange focus:ring-0 transition-all font-bold text-gray-700"
-                        value={formData.specialty || ''}
-                        onChange={e => setFormData({ ...formData, specialty: e.target.value })}
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">Years of Experience</label>
-                    <div className="relative">
-                      <Award className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-300" size={18} />
-                      <input
-                        type="text"
-                        className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-100 rounded-xl focus:border-care-orange focus:ring-0 transition-all font-bold text-gray-700"
-                        value={formData.experience || ''}
-                        onChange={e => setFormData({ ...formData, experience: e.target.value })}
-                      />
-                    </div>
+            <div>
+              <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">
+                Phone Number
+              </label>
+              <div className="relative">
+                <Phone className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                <input
+                  type="tel"
+                  placeholder="(555) 123-4567"
+                  className="w-full pl-10 pr-4 py-3 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-care-orange focus:ring-0 transition-all text-sm font-medium"
+                  value={formData.phone}
+                  onChange={e => setFormData({ ...formData, phone: e.target.value })}
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">
+                Location
+              </label>
+              <div className="relative">
+                <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                <input
+                  type="text"
+                  placeholder="City, State"
+                  className="w-full pl-10 pr-4 py-3 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-care-orange focus:ring-0 transition-all text-sm font-medium"
+                  value={formData.location}
+                  onChange={e => setFormData({ ...formData, location: e.target.value })}
+                />
+              </div>
+            </div>
+
+            {(user.role === 'CONTRACTOR' || user.role === 'ADMIN') && (
+              <>
+                <div>
+                  <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">
+                    Company
+                  </label>
+                  <div className="relative">
+                    <Briefcase className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                    <input
+                      type="text"
+                      placeholder="Company name"
+                      className="w-full pl-10 pr-4 py-3 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-care-orange focus:ring-0 transition-all text-sm font-medium"
+                      value={formData.company}
+                      onChange={e => setFormData({ ...formData, company: e.target.value })}
+                    />
                   </div>
                 </div>
+
+                <div>
+                  <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">
+                    Specialty
+                  </label>
+                  <select
+                    className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-care-orange focus:ring-0 transition-all text-sm font-medium appearance-none cursor-pointer"
+                    value={formData.specialty}
+                    onChange={e => setFormData({ ...formData, specialty: e.target.value })}
+                  >
+                    <option value="">Select specialty...</option>
+                    <option value="General Contractor">General Contractor</option>
+                    <option value="Carpentry">Carpentry</option>
+                    <option value="Electrical">Electrical</option>
+                    <option value="Plumbing">Plumbing</option>
+                    <option value="HVAC">HVAC</option>
+                    <option value="Roofing">Roofing</option>
+                    <option value="Masonry">Masonry</option>
+                    <option value="Painting">Painting</option>
+                    <option value="Flooring">Flooring</option>
+                    <option value="Landscaping">Landscaping</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">
+                    Experience
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. 10+ years"
+                    className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-care-orange focus:ring-0 transition-all text-sm font-medium"
+                    value={formData.experience}
+                    onChange={e => setFormData({ ...formData, experience: e.target.value })}
+                  />
+                </div>
+              </>
+            )}
+          </div>
+
+          <div>
+            <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">
+              Bio
+            </label>
+            <div className="relative">
+              <FileText className="absolute left-3 top-3 text-gray-400" size={18} />
+              <textarea
+                rows={4}
+                placeholder="Tell us about yourself..."
+                className="w-full pl-10 pr-4 py-3 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-care-orange focus:ring-0 transition-all text-sm font-medium resize-none"
+                value={formData.bio}
+                onChange={e => setFormData({ ...formData, bio: e.target.value })}
+              />
+            </div>
+          </div>
+
+          <div className="flex justify-end pt-4">
+            <button
+              type="submit"
+              disabled={loading}
+              className="bg-care-orange text-white px-8 py-3 rounded-xl font-black uppercase tracking-widest text-xs hover:shadow-lg hover:shadow-care-orange/20 transition-all disabled:opacity-50 flex items-center gap-2"
+            >
+              {loading ? (
+                <>
+                  <Loader2 size={16} className="animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <Save size={16} />
+                  Save Changes
+                </>
               )}
-
-              <div>
-                <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">Bio / Professional Summary</label>
-                <div className="relative">
-                  <Info className="absolute left-3 top-4 text-gray-300" size={18} />
-                  <textarea
-                    rows={4}
-                    className="w-full pl-10 pr-4 py-3 bg-gray-50 border border-gray-100 rounded-xl focus:border-care-orange focus:ring-0 transition-all font-medium text-gray-700"
-                    value={formData.bio || ''}
-                    onChange={e => setFormData({ ...formData, bio: e.target.value })}
-                  />
-                </div>
-              </div>
-            </div>
+            </button>
           </div>
-        </div>
+        </form>
+      </div>
 
-        <div className="flex items-center justify-between bg-[#1A1A1A] p-6 rounded-[2rem] shadow-2xl text-white">
-          <div className="flex items-center gap-4">
-             {isSaved ? (
-               <div className="flex items-center gap-2 text-green-400 font-black uppercase text-xs tracking-widest animate-in slide-in-from-left-2">
-                 <Save size={16} /> All Changes Saved!
-               </div>
-             ) : (
-               <p className="text-[10px] font-black uppercase tracking-widest text-white/40">Ready to save updates?</p>
-             )}
-          </div>
-          <button 
-            type="submit"
-            className="bg-care-orange px-8 py-3 rounded-xl font-black uppercase tracking-widest text-sm hover:scale-105 transition-transform active:scale-95 shadow-xl shadow-care-orange/20"
-          >
-            Save Changes
-          </button>
-        </div>
-      </form>
+      {/* Danger Zone */}
+      <div className="bg-white rounded-2xl shadow-sm border border-red-100 p-8 mt-8">
+        <h3 className="text-sm font-black text-red-500 uppercase tracking-widest mb-4">Danger Zone</h3>
+        <p className="text-gray-500 text-sm mb-4">
+          Once you delete your account, there is no going back. Please be certain.
+        </p>
+        <button className="border-2 border-red-200 text-red-500 px-6 py-2 rounded-xl font-bold text-sm hover:bg-red-50 transition-all">
+          Delete Account
+        </button>
+      </div>
     </div>
   );
 };

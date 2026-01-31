@@ -1,5 +1,4 @@
 import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-/// <reference types="vite/client" />
 import { 
   signInWithPopup, 
   signInWithEmailAndPassword, 
@@ -9,12 +8,7 @@ import {
 } from 'firebase/auth';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { auth, googleProvider, db } from "../lib/firebase";
-import { User as BaseUser, UserRole } from '../types'; // Import your existing base type
-
-// Extend the imported User type to include the company property
-interface User extends BaseUser {
-  company?: string;
-}
+import { User, UserRole } from '../types';
 
 interface AuthContextType {
   user: User | null;
@@ -23,6 +17,7 @@ interface AuthContextType {
   loginWithEmail: (email: string, pass: string) => Promise<void>;
   signupWithEmail: (email: string, pass: string, name: string, role: UserRole) => Promise<void>;
   logout: () => Promise<void>;
+  updateUserProfile: (updates: Partial<User>) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -31,16 +26,16 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Sync Firebase Auth State with Firestore User Data
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (currentUser) {
-        // Fetch extended profile (Role, Company, etc.) from Firestore
         const userDocRef = doc(db, 'users', currentUser.uid);
         const userSnap = await getDoc(userDocRef);
 
         if (userSnap.exists()) {
           setUser({ id: currentUser.uid, ...userSnap.data() } as User);
+        } else {
+          setUser(null);
         }
       } else {
         setUser(null);
@@ -57,7 +52,6 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const userRef = doc(db, 'users', result.user.uid);
       const userSnap = await getDoc(userRef);
 
-      // If this is a new user via Google, create their DB profile
       if (!userSnap.exists()) {
         const newUser: User = {
           id: result.user.uid,
@@ -65,8 +59,8 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           email: result.user.email || '',
           role: selectedRole,
           avatar: result.user.photoURL || 'https://via.placeholder.com/150',
-          // Fix: The 'company' property is now recognized by our extended interface
-          company: selectedRole === UserRole.CONTRACTOR ? 'Freelance' : undefined
+          company: selectedRole === UserRole.CONTRACTOR ? 'Freelance' : undefined,
+          createdAt: new Date().toISOString()
         };
         await setDoc(userRef, newUser);
         setUser(newUser);
@@ -84,13 +78,13 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const signupWithEmail = async (email: string, pass: string, name: string, role: UserRole) => {
     const result = await createUserWithEmailAndPassword(auth, email, pass);
     
-    // Create Firestore Profile
     const newUser: User = {
       id: result.user.uid,
       name,
       email,
       role,
       avatar: 'https://via.placeholder.com/150',
+      createdAt: new Date().toISOString()
     };
     
     await setDoc(doc(db, 'users', result.user.uid), newUser);
@@ -102,8 +96,24 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     setUser(null);
   };
 
+  const updateUserProfile = async (updates: Partial<User>) => {
+    if (!user) return;
+    
+    const userRef = doc(db, 'users', user.id);
+    await setDoc(userRef, { ...user, ...updates }, { merge: true });
+    setUser({ ...user, ...updates });
+  };
+
   return (
-    <AuthContext.Provider value={{ user, loading, loginWithGoogle, loginWithEmail, signupWithEmail, logout }}>
+    <AuthContext.Provider value={{ 
+      user, 
+      loading, 
+      loginWithGoogle, 
+      loginWithEmail, 
+      signupWithEmail, 
+      logout,
+      updateUserProfile 
+    }}>
       {children}
     </AuthContext.Provider>
   );

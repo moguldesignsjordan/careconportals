@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@google/genai": "^1.38.0",
+    "@types/babel__generator": "^7.27.0",
     "firebase": "^12.8.0",
     "lucide-react": "^0.563.0",
     "react": "^19.0.0",

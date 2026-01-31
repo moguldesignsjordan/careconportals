@@ -12,7 +12,7 @@ import {
   deleteDocument,
   sendMessage,
   updateProjectStatus,
-  addProjectUpdate
+  addProjectUpdate,
 } from './services/db';
 
 // Components
@@ -110,7 +110,7 @@ const App: React.FC = () => {
   // Toast helper
   const showToast = (
     message: string,
-    type: 'success' | 'error' | 'info' = 'info'
+    type: 'success' | 'error' | 'info' = 'info',
   ) => {
     const id = Math.random().toString(36).substr(2, 9);
     setToasts((prev) => [...prev, { id, message, type }]);
@@ -136,7 +136,7 @@ const App: React.FC = () => {
   };
 
   const handleCreateProject = async (
-    projectData: Omit<Project, 'id' | 'updates' | 'createdAt'>
+    projectData: Omit<Project, 'id' | 'updates' | 'createdAt'>,
   ) => {
     try {
       await createProject(projectData);
@@ -172,10 +172,7 @@ const App: React.FC = () => {
 
   const handleUploadDocument = async (
     file: File,
-    metadata: Omit<
-      ProjectDocument,
-      'id' | 'fileUrl' | 'uploadedAt' | 'fileSize'
-    >
+    metadata: Omit<ProjectDocument, 'id' | 'fileUrl' | 'uploadedAt' | 'fileSize'>,
   ) => {
     try {
       await uploadDocument(file, metadata);
@@ -199,7 +196,7 @@ const App: React.FC = () => {
   const handleSendMessage = async (
     receiverId: string,
     content: string,
-    projectId?: string
+    projectId?: string,
   ) => {
     if (!user) return;
     try {
@@ -213,7 +210,7 @@ const App: React.FC = () => {
   const handleUpdateProjectStatus = async (
     projectId: string,
     status: any,
-    progress: number
+    progress: number,
   ) => {
     try {
       await updateProjectStatus(projectId, status, progress);
@@ -224,10 +221,7 @@ const App: React.FC = () => {
     }
   };
 
-  const handleAddProjectUpdate = async (
-    projectId: string,
-    content: string
-  ) => {
+  const handleAddProjectUpdate = async (projectId: string, content: string) => {
     if (!user) return;
     try {
       await addProjectUpdate(projectId, content, user.name);
@@ -395,6 +389,7 @@ const App: React.FC = () => {
               onOpenCreateModal={() => setShowCreateProject(true)}
               onOpenCreateClientModal={() => setShowCreateClient(true)}
               onOpenCreateContractorModal={() => setShowCreateContractor(true)}
+              onOpenMessages={() => handleOpenMessages()}
             />
           );
         } else if (user.role === UserRole.CONTRACTOR) {
@@ -405,6 +400,7 @@ const App: React.FC = () => {
               currentUser={user}
               onSelectProject={handleSelectProject}
               onOpenCreateModal={() => setShowCreateProject(true)}
+              onOpenMessages={() => handleOpenMessages()}
             />
           );
         } else {
@@ -425,7 +421,7 @@ const App: React.FC = () => {
   return (
     <div className="h-screen bg-white flex overflow-hidden">
       {/* Mobile header */}
-      <div className="lg:hidden fixed top-0 left-0 right-0 h-16 bg-white border-b border-gray-200 flex items-center justify-between px-4 z-40">
+      <div className="lg:hidden fixed top-0 left-0 right-0 h-16 bg-white border-b border-gray-100 flex items-center justify-between px-4 z-40">
         <button
           onClick={() => setSidebarOpen(true)}
           className="p-2 rounded-xl hover:bg-care-orange/10 transition-colors"

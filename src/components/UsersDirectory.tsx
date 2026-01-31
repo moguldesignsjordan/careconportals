@@ -1,273 +1,227 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { User, UserRole } from '../types';
-import { Mail, Phone, MapPin, Award, User as UserIcon, X, Briefcase, MessageSquare, UserPlus, HardHat, Trash2 } from 'lucide-react';
+import {
+  Users,
+  Search,
+  Mail,
+  Phone,
+  MapPin,
+  MessageSquare,
+  UserPlus,
+  HardHat,
+} from 'lucide-react';
 
 interface UsersDirectoryProps {
   users: User[];
   currentUser: User;
-  onMessageUser: (user: User) => void;
   onOpenCreateClientModal: () => void;
   onOpenCreateContractorModal: () => void;
-  onDeleteUser?: (userId: string) => void;
+  onMessageUser: (user: User) => void;
 }
 
-const UsersDirectory: React.FC<UsersDirectoryProps> = ({ 
-  users, 
-  currentUser, 
-  onMessageUser,
+type RoleFilter = 'all' | 'client' | 'contractor';
+
+const UsersDirectory: React.FC<UsersDirectoryProps> = ({
+  users,
+  currentUser,
   onOpenCreateClientModal,
   onOpenCreateContractorModal,
-  onDeleteUser
+  onMessageUser,
 }) => {
-  const [selectedProfile, setSelectedProfile] = useState<User | null>(null);
+  const [roleFilter, setRoleFilter] = useState<RoleFilter>('all');
+  const [search, setSearch] = useState('');
 
-  const contractors = users.filter(u => u.role === UserRole.CONTRACTOR);
-  const admins = users.filter(u => u.role === UserRole.ADMIN);
-  const clients = users.filter(u => u.role === UserRole.CLIENT);
+  const filteredUsers = useMemo(() => {
+    return users.filter((user) => {
+      if (user.id === currentUser.id) return false;
 
-  const getRoleBadge = (role: UserRole) => {
-    switch (role) {
-      case UserRole.ADMIN: return { bg: 'bg-purple-500', text: 'Admin' };
-      case UserRole.CONTRACTOR: return { bg: 'bg-care-orange', text: 'Contractor' };
-      case UserRole.CLIENT: return { bg: 'bg-green-500', text: 'Client' };
-    }
-  };
+      if (roleFilter === 'client' && user.role !== UserRole.CLIENT) {
+        return false;
+      }
+      if (roleFilter === 'contractor' && user.role !== UserRole.CONTRACTOR) {
+        return false;
+      }
 
-  const UserCard = ({ user }: { user: User }) => {
-    const badge = getRoleBadge(user.role);
-    
-    return (
-      <div 
-        onClick={() => setSelectedProfile(user)}
-        className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm hover:shadow-lg hover:border-care-orange/20 transition-all cursor-pointer group"
-      >
-        <div className="relative inline-block mb-4">
-          <img 
-            src={user.avatar || 'https://via.placeholder.com/80'} 
-            alt={user.name} 
-            className="w-20 h-20 rounded-2xl object-cover border-2 border-transparent group-hover:border-care-orange transition-all mx-auto" 
-          />
-          <div className={`absolute -bottom-1 -right-1 ${badge.bg} text-white text-[8px] font-black px-2 py-0.5 rounded-full uppercase`}>
-            {badge.text}
-          </div>
-        </div>
-        <h3 className="font-bold text-gray-900 group-hover:text-care-orange transition-colors text-center">{user.name}</h3>
-        <p className="text-xs text-gray-500 text-center mt-1">{user.specialty || user.email}</p>
-        
-        <div className="mt-4 pt-4 border-t border-gray-50 flex justify-center gap-3">
-          <button 
-            onClick={(e) => { e.stopPropagation(); onMessageUser(user); }} 
-            className="p-2 hover:text-care-orange hover:bg-care-orange/5 rounded-lg transition-all text-gray-400"
-          >
-            <MessageSquare size={16} />
-          </button>
-          {user.email && (
-            <a 
-              href={`mailto:${user.email}`}
-              onClick={(e) => e.stopPropagation()}
-              className="p-2 hover:text-care-orange hover:bg-care-orange/5 rounded-lg transition-all text-gray-400"
-            >
-              <Mail size={16} />
-            </a>
-          )}
-          {user.phone && (
-            <a 
-              href={`tel:${user.phone}`}
-              onClick={(e) => e.stopPropagation()}
-              className="p-2 hover:text-care-orange hover:bg-care-orange/5 rounded-lg transition-all text-gray-400"
-            >
-              <Phone size={16} />
-            </a>
-          )}
-        </div>
-      </div>
-    );
-  };
+      if (!search.trim()) return true;
+
+      const q = search.toLowerCase();
+      return (
+        user.name.toLowerCase().includes(q) ||
+        user.email.toLowerCase().includes(q) ||
+        (user.company && user.company.toLowerCase().includes(q))
+      );
+    });
+  }, [users, currentUser.id, roleFilter, search]);
+
+  const isAdmin = currentUser.role === UserRole.ADMIN;
 
   return (
-    <div className="space-y-10 animate-in fade-in duration-500 pb-20">
+    <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-        <div>
-          <h1 className="text-2xl font-black text-gray-900 uppercase tracking-tight">Team Directory</h1>
-          <p className="text-gray-500 font-medium">Manage clients and contractors</p>
+      <header className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-care-orange/10">
+            <Users size={20} className="text-care-orange" />
+          </div>
+          <div>
+            <p className="text-[11px] font-black uppercase tracking-[0.18em] text-gray-400">
+              People directory
+            </p>
+            <h1 className="mt-1 text-xl font-black text-[#1A1A1A]">
+              Clients & contractors
+            </h1>
+          </div>
         </div>
-        {currentUser.role === UserRole.ADMIN && (
-          <div className="flex gap-2">
+
+        {isAdmin && (
+          <div className="flex flex-wrap gap-3">
             <button
               onClick={onOpenCreateClientModal}
-              className="bg-green-600 text-white px-4 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2 hover:shadow-lg hover:shadow-green-600/20 transition-all"
+              className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2 text-xs font-semibold text-[#1A1A1A] shadow-sm transition-all hover:border-care-orange/40 hover:shadow-md"
             >
-              <UserPlus size={16} />
-              Add Client
+              <UserPlus size={14} />
+              Add client
             </button>
             <button
               onClick={onOpenCreateContractorModal}
-              className="bg-care-orange text-white px-4 py-2.5 rounded-xl font-bold text-xs flex items-center gap-2 hover:shadow-lg hover:shadow-care-orange/20 transition-all"
+              className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2 text-xs font-semibold text-[#1A1A1A] shadow-sm transition-all hover:border-care-orange/40 hover:shadow-md"
             >
-              <HardHat size={16} />
-              Add Contractor
+              <HardHat size={14} />
+              Add contractor
             </button>
           </div>
         )}
-      </div>
+      </header>
 
-      {/* Contractors Section */}
+      {/* Filters */}
+      <section className="flex flex-col gap-4 rounded-2xl border border-gray-100 bg-white p-4 shadow-sm md:flex-row md:items-center md:justify-between">
+        <div className="flex flex-1 items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-2">
+          <Search size={16} className="text-gray-400" />
+          <input
+            type="text"
+            placeholder="Search by name, company, or email..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="h-8 w-full border-0 bg-transparent text-sm text-[#1A1A1A] outline-none placeholder:text-gray-400"
+          />
+        </div>
+
+        <div className="flex gap-2">
+          {[
+            { id: 'all', label: 'All' },
+            { id: 'client', label: 'Clients' },
+            { id: 'contractor', label: 'Contractors' },
+          ].map((filter) => {
+            const active = roleFilter === filter.id;
+            return (
+              <button
+                key={filter.id}
+                type="button"
+                onClick={() => setRoleFilter(filter.id as RoleFilter)}
+                className={[
+                  'rounded-full px-3 py-1 text-xs font-semibold transition-all',
+                  active
+                    ? 'bg-care-orange text-white'
+                    : 'bg-[#FDEEE9]/50 text-gray-600 hover:bg-[#FDEEE9]',
+                ].join(' ')}
+              >
+                {filter.label}
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      {/* Directory list */}
       <section>
-        <h2 className="text-xs font-black text-gray-400 uppercase tracking-widest mb-6 flex items-center gap-3">
-          <HardHat size={16} className="text-care-orange" />
-          Field Contractors ({contractors.length})
-          <div className="h-px flex-1 bg-gray-100"></div>
-        </h2>
-        {contractors.length > 0 ? (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {contractors.map(u => <UserCard key={u.id} user={u} />)}
+        {filteredUsers.length === 0 ? (
+          <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-gray-200 bg-white px-6 py-10 text-center">
+            <p className="text-sm font-medium text-gray-500">
+              No users match your filters yet.
+            </p>
+            <p className="mt-1 text-xs text-gray-400">
+              Adjust filters or add a new client/contractor.
+            </p>
           </div>
         ) : (
-          <div className="bg-gray-50 border-2 border-dashed border-gray-200 rounded-2xl p-8 text-center">
-            <HardHat size={40} className="mx-auto text-gray-300 mb-3" />
-            <p className="text-gray-500 font-medium">No contractors yet</p>
-            {currentUser.role === UserRole.ADMIN && (
-              <button 
-                onClick={onOpenCreateContractorModal}
-                className="mt-3 text-care-orange font-bold text-sm hover:underline"
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
+            {filteredUsers.map((user) => (
+              <div
+                key={user.id}
+                className="flex flex-col gap-3 rounded-2xl border border-gray-100 bg-white p-4 shadow-sm"
               >
-                Add your first contractor →
-              </button>
-            )}
+                <div className="flex items-start gap-3">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-full bg-care-orange/20 text-xs font-bold text-care-orange">
+                    {user.name
+                      .split(' ')
+                      .map((n) => n[0])
+                      .join('')
+                      .slice(0, 2)
+                      .toUpperCase()}
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <div>
+                        <p className="text-sm font-semibold text-[#1A1A1A]">
+                          {user.name}
+                        </p>
+                        {user.company && (
+                          <p className="text-xs text-gray-500">
+                            {user.company}
+                          </p>
+                        )}
+                      </div>
+                      <span className="rounded-full bg-[#FDEEE9] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.16em] text-care-orange">
+                        {user.role === UserRole.CLIENT
+                          ? 'Client'
+                          : 'Contractor'}
+                      </span>
+                    </div>
+
+                    {user.specialty && user.role === UserRole.CONTRACTOR && (
+                      <p className="mt-1 text-xs text-gray-500">
+                        {user.specialty}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="space-y-1 text-xs text-gray-500">
+                  {user.email && (
+                    <p className="flex items-center gap-1">
+                      <Mail size={12} className="text-gray-400" />
+                      <span className="truncate">{user.email}</span>
+                    </p>
+                  )}
+                  {user.phone && (
+                    <p className="flex items-center gap-1">
+                      <Phone size={12} className="text-gray-400" />
+                      <span>{user.phone}</span>
+                    </p>
+                  )}
+                  {user.location && (
+                    <p className="flex items-center gap-1">
+                      <MapPin size={12} className="text-gray-400" />
+                      <span className="truncate">{user.location}</span>
+                    </p>
+                  )}
+                </div>
+
+                <div className="mt-1 flex items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={() => onMessageUser(user)}
+                    className="inline-flex items-center gap-1 rounded-xl bg-care-orange px-3 py-1.5 text-xs font-semibold text-white transition-all hover:shadow-md hover:shadow-care-orange/30"
+                  >
+                    <MessageSquare size={12} />
+                    Message
+                  </button>
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </section>
-
-      {/* Clients Section */}
-      {currentUser.role === UserRole.ADMIN && (
-        <section>
-          <h2 className="text-xs font-black text-gray-400 uppercase tracking-widest mb-6 flex items-center gap-3">
-            <UserIcon size={16} className="text-green-500" />
-            Clients ({clients.length})
-            <div className="h-px flex-1 bg-gray-100"></div>
-          </h2>
-          {clients.length > 0 ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              {clients.map(u => <UserCard key={u.id} user={u} />)}
-            </div>
-          ) : (
-            <div className="bg-gray-50 border-2 border-dashed border-gray-200 rounded-2xl p-8 text-center">
-              <UserIcon size={40} className="mx-auto text-gray-300 mb-3" />
-              <p className="text-gray-500 font-medium">No clients yet</p>
-              <button 
-                onClick={onOpenCreateClientModal}
-                className="mt-3 text-green-600 font-bold text-sm hover:underline"
-              >
-                Add your first client →
-              </button>
-            </div>
-          )}
-        </section>
-      )}
-
-      {/* Admins Section */}
-      {admins.length > 0 && (
-        <section>
-          <h2 className="text-xs font-black text-gray-400 uppercase tracking-widest mb-6 flex items-center gap-3">
-            <Award size={16} className="text-purple-500" />
-            Administrators ({admins.length})
-            <div className="h-px flex-1 bg-gray-100"></div>
-          </h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            {admins.map(u => <UserCard key={u.id} user={u} />)}
-          </div>
-        </section>
-      )}
-
-      {/* Profile Modal */}
-      {selectedProfile && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setSelectedProfile(null)}></div>
-          
-          <div className="relative bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
-            <div className={`${getRoleBadge(selectedProfile.role).bg} p-8 text-white text-center relative`}>
-              <button 
-                onClick={() => setSelectedProfile(null)}
-                className="absolute top-4 right-4 p-2 hover:bg-white/10 rounded-full transition-colors"
-              >
-                <X size={24} />
-              </button>
-              <img 
-                src={selectedProfile.avatar || 'https://via.placeholder.com/100'} 
-                alt={selectedProfile.name}
-                className="w-24 h-24 rounded-2xl object-cover mx-auto border-4 border-white/20"
-              />
-              <h2 className="text-2xl font-black mt-4">{selectedProfile.name}</h2>
-              <p className="text-white/70 text-sm uppercase tracking-widest font-bold mt-1">{selectedProfile.role}</p>
-            </div>
-
-            <div className="p-6 space-y-4">
-              {selectedProfile.specialty && (
-                <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl">
-                  <Briefcase size={18} className="text-gray-400" />
-                  <div>
-                    <p className="text-xs text-gray-400 uppercase font-bold">Specialty</p>
-                    <p className="font-bold">{selectedProfile.specialty}</p>
-                  </div>
-                </div>
-              )}
-              {selectedProfile.experience && (
-                <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl">
-                  <Award size={18} className="text-gray-400" />
-                  <div>
-                    <p className="text-xs text-gray-400 uppercase font-bold">Experience</p>
-                    <p className="font-bold">{selectedProfile.experience}</p>
-                  </div>
-                </div>
-              )}
-              {selectedProfile.email && (
-                <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl">
-                  <Mail size={18} className="text-gray-400" />
-                  <div>
-                    <p className="text-xs text-gray-400 uppercase font-bold">Email</p>
-                    <p className="font-bold">{selectedProfile.email}</p>
-                  </div>
-                </div>
-              )}
-              {selectedProfile.phone && (
-                <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl">
-                  <Phone size={18} className="text-gray-400" />
-                  <div>
-                    <p className="text-xs text-gray-400 uppercase font-bold">Phone</p>
-                    <p className="font-bold">{selectedProfile.phone}</p>
-                  </div>
-                </div>
-              )}
-              {selectedProfile.location && (
-                <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl">
-                  <MapPin size={18} className="text-gray-400" />
-                  <div>
-                    <p className="text-xs text-gray-400 uppercase font-bold">Location</p>
-                    <p className="font-bold">{selectedProfile.location}</p>
-                  </div>
-                </div>
-              )}
-              {selectedProfile.bio && (
-                <div className="p-3 bg-gray-50 rounded-xl">
-                  <p className="text-xs text-gray-400 uppercase font-bold mb-1">Bio</p>
-                  <p className="text-gray-600">{selectedProfile.bio}</p>
-                </div>
-              )}
-
-              <div className="flex gap-2 pt-4">
-                <button
-                  onClick={() => { onMessageUser(selectedProfile); setSelectedProfile(null); }}
-                  className="flex-1 py-3 bg-care-orange text-white rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-orange-600 transition-all"
-                >
-                  <MessageSquare size={18} />
-                  Message
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

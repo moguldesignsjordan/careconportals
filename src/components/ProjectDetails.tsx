@@ -1,19 +1,24 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
+import {
+  Project,
+  User,
+  ProjectStatus,
+  UserRole,
+} from '../types';
 import {
   ArrowLeft,
   Calendar,
-  MapPin,
-  CheckCircle,
-  Clock,
+  DollarSign,
+  User as UserIcon,
   MessageSquare,
-  FileText,
+  Clock,
+  Edit3,
 } from 'lucide-react';
-import { Project, User, ProjectStatus } from '../types';
 
 interface ProjectDetailsProps {
   project: Project;
-  currentUser: User;
   users: User[];
+  currentUser: User;
   onBack: () => void;
   onUpdateStatus: (
     projectId: string,
@@ -21,282 +26,363 @@ interface ProjectDetailsProps {
     progress: number
   ) => Promise<void>;
   onAddUpdate: (projectId: string, content: string) => Promise<void>;
-  onMessage: (user: User, projectId?: string) => void;
+  onMessage: (user: User) => void;
 }
+
+const statusOptions: ProjectStatus[] = [
+  ProjectStatus.PLANNING,
+  ProjectStatus.DEMOLITION,
+  ProjectStatus.ROUGH_IN,
+  ProjectStatus.FINISHING,
+  ProjectStatus.COMPLETED,
+  ProjectStatus.ON_HOLD,
+];
+
+const getStatusBadgeClasses = (status: ProjectStatus) => {
+  switch (status) {
+    case ProjectStatus.COMPLETED:
+      return 'bg-[#1A1A1A] text-white';
+    case ProjectStatus.ON_HOLD:
+      return 'bg-[#FDEEE9] text-[#1A1A1A] border border-dashed border-care-orange';
+    default:
+      return 'bg-care-orange/10 text-care-orange';
+  }
+};
 
 const ProjectDetails: React.FC<ProjectDetailsProps> = ({
   project,
-  currentUser,
   users,
+  currentUser,
   onBack,
   onUpdateStatus,
   onAddUpdate,
   onMessage,
 }) => {
-  const [updateText, setUpdateText] = useState('');
-  const [updating, setUpdating] = useState(false);
+  const [tempStatus, setTempStatus] = useState<ProjectStatus>(project.status);
+  const [tempProgress, setTempProgress] = useState<number>(project.progress);
+  const [updateContent, setUpdateContent] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [postingUpdate, setPostingUpdate] = useState(false);
 
-  const client = users.find((u) => u.id === project.clientId) || null;
-  const contractor =
-    users.find((u) => u.id === project.contractorId) || null;
+  const client = useMemo(
+    () => users.find((u) => u.id === project.clientId),
+    [users, project.clientId],
+  );
+  const contractor = useMemo(
+    () => users.find((u) => u.id === project.contractorId),
+    [users, project.contractorId],
+  );
 
-  const handleSubmitUpdate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!updateText.trim()) return;
-    setUpdating(true);
+  const canEdit =
+    currentUser.role === UserRole.ADMIN ||
+    currentUser.id === project.contractorId;
+
+  const handleSaveStatus = async () => {
+    if (!canEdit) return;
+    setSaving(true);
     try {
-      await onAddUpdate(project.id, updateText.trim());
-      setUpdateText('');
+      await onUpdateStatus(project.id, tempStatus, tempProgress);
     } finally {
-      setUpdating(false);
+      setSaving(false);
     }
   };
 
-  const handleStatusChange = async (status: ProjectStatus) => {
-    let progress = project.progress || 0;
-    if (status === 'completed') progress = 100;
-    if (status === 'planned') progress = 0;
-    await onUpdateStatus(project.id, status, progress);
+  const handleSubmitUpdate = async () => {
+    if (!updateContent.trim()) return;
+    setPostingUpdate(true);
+    try {
+      await onAddUpdate(project.id, updateContent.trim());
+      setUpdateContent('');
+    } finally {
+      setPostingUpdate(false);
+    }
   };
 
   const formatDate = (value?: string) => {
-    if (!value) return 'TBD';
-    try {
-      return new Date(value).toLocaleDateString();
-    } catch {
-      return value;
-    }
+    if (!value) return 'Not set';
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return value;
+    return d.toLocaleDateString();
   };
+
+  const updates = (project.updates || []).slice().sort(
+    (a, b) =>
+      new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+  );
 
   return (
     <div className="space-y-6">
       {/* Header */}
-      <header className="flex flex-col md:flex-row gap-4 md:items-center justify-between">
+      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div className="flex items-center gap-3">
           <button
+            type="button"
             onClick={onBack}
-            className="h-9 w-9 rounded-xl border border-gray-200 flex items-center justify-center hover:bg-gray-50 transition-colors"
+            className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-gray-200 bg-white text-gray-600 transition-all hover:border-care-orange/50 hover:text-care-orange"
           >
             <ArrowLeft size={16} />
           </button>
           <div>
-            <p className="text-[10px] font-black text-gray-400 uppercase tracking-[0.18em] mb-1">
-              Project Details
+            <p className="text-[11px] font-black uppercase tracking-[0.18em] text-gray-400">
+              Project
             </p>
-            <h1 className="text-xl md:text-2xl font-black text-[#111827]">
+            <h1 className="mt-1 text-xl font-black text-[#1A1A1A] md:text-2xl">
               {project.title}
             </h1>
-            {project.location && (
-              <p className="text-xs text-gray-500 flex items-center gap-1 mt-1">
-                <MapPin size={12} className="text-care-orange" />
-                {project.location}
-              </p>
-            )}
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-2">
-          <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-[11px] bg-gray-100 text-gray-700">
-            <Calendar size={12} />
-            {formatDate(project.startDate)} – {formatDate(project.endDate)}
-          </span>
-          <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-[11px] bg-care-orange/10 text-care-orange font-semibold">
+        <div className="flex flex-wrap items-center gap-3">
+          <span
+            className={[
+              'rounded-full px-3 py-1 text-xs font-semibold',
+              getStatusBadgeClasses(project.status),
+            ].join(' ')}
+          >
             {project.status}
           </span>
+          <span className="rounded-full bg-[#FDEEE9] px-3 py-1 text-xs font-semibold text-care-orange">
+            {project.progress}% complete
+          </span>
         </div>
-      </header>
+      </div>
 
-      {/* Top data cards */}
-      <section className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-white border border-gray-100 rounded-2xl p-4">
-          <p className="text-[11px] text-gray-400 uppercase tracking-[0.18em] mb-1">
-            Progress
-          </p>
-          <p className="text-2xl font-black text-[#111827]">
-            {project.progress || 0}%
-          </p>
-          <div className="mt-3 h-2 bg-gray-100 rounded-full overflow-hidden">
-            <div
-              className="h-full bg-care-orange rounded-full transition-all"
-              style={{ width: `${project.progress || 0}%` }}
-            />
-          </div>
-        </div>
-
-        <div className="bg-white border border-gray-100 rounded-2xl p-4">
-          <p className="text-[11px] text-gray-400 uppercase tracking-[0.18em] mb-1">
-            Status
-          </p>
-          <div className="flex flex-wrap gap-2 mt-1">
-            {(['planned', 'in-progress', 'completed'] as ProjectStatus[]).map(
-              (status) => (
-                <button
-                  key={status}
-                  onClick={() => handleStatusChange(status)}
-                  className={`px-3 py-1.5 rounded-full text-[11px] font-semibold border transition-all ${
-                    project.status === status
-                      ? 'bg-care-orange text-white border-care-orange'
-                      : 'bg-white text-gray-600 border-gray-200 hover:border-care-orange/60'
-                  }`}
-                >
-                  {status === 'planned' && 'Planned'}
-                  {status === 'in-progress' && 'In Progress'}
-                  {status === 'completed' && 'Completed'}
-                </button>
-              )
-            )}
-          </div>
-        </div>
-
-        <div className="bg-white border border-gray-100 rounded-2xl p-4">
-          <p className="text-[11px] text-gray-400 uppercase tracking-[0.18em] mb-1">
-            Budget
-          </p>
-          <p className="text-2xl font-black text-[#111827]">
-            {project.budget
-              ? project.budget.toLocaleString(undefined, {
-                  style: 'currency',
-                  currency: 'USD',
-                  maximumFractionDigits: 0,
-                })
-              : 'TBD'}
-          </p>
-        </div>
-      </section>
-
-      {/* Layout: left = team/updates, right = notes/docs */}
-      <section className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
-        {/* Left: Team + updates */}
+      {/* Top summary */}
+      <section className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="space-y-4 lg:col-span-2">
-          {/* Team */}
-          <div className="bg-white border border-gray-100 rounded-2xl p-4 space-y-3">
-            <h2 className="text-xs font-black text-[#111827] uppercase tracking-[0.18em]">
-              Project Team
+          <div className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+            <h2 className="text-sm font-black uppercase tracking-[0.18em] text-gray-400">
+              Overview
             </h2>
+            {project.description && (
+              <p className="mt-3 text-sm text-gray-600">
+                {project.description}
+              </p>
+            )}
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-              {client && (
-                <div className="flex items-center justify-between rounded-xl border border-gray-100 bg-gray-50 px-3 py-3">
-                  <div className="flex items-center gap-3">
-                    <div className="h-9 w-9 rounded-full bg-white flex items-center justify-center text-xs font-semibold text-gray-700">
-                      {client.name.charAt(0).toUpperCase()}
-                    </div>
-                    <div>
-                      <p className="font-semibold text-gray-900">
-                        {client.name}
-                      </p>
-                      <p className="text-[11px] text-gray-500">Client</p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => onMessage(client, project.id)}
-                    className="p-2 text-care-orange hover:bg-care-orange/10 rounded-lg transition-all"
-                  >
-                    <MessageSquare size={18} />
-                  </button>
-                </div>
-              )}
-
-              {contractor && (
-                <div className="flex items-center justify-between rounded-xl border border-gray-100 bg-gray-50 px-3 py-3">
-                  <div className="flex items-center gap-3">
-                    <div className="h-9 w-9 rounded-full bg-white flex items-center justify-center text-xs font-semibold text-gray-700">
-                      {contractor.name.charAt(0).toUpperCase()}
-                    </div>
-                    <div>
-                      <p className="font-semibold text-gray-900">
-                        {contractor.name}
-                      </p>
-                      <p className="text-[11px] text-gray-500">Contractor</p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => onMessage(contractor, project.id)}
-                    className="p-2 text-care-orange hover:bg-care-orange/10 rounded-lg transition-all"
-                  >
-                    <MessageSquare size={18} />
-                  </button>
-                </div>
-              )}
+            <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
+              <div className="space-y-1 text-sm">
+                <p className="text-xs font-semibold text-gray-500">
+                  <Calendar className="mr-1 inline-block h-3 w-3" />
+                  Start date
+                </p>
+                <p className="text-[#1A1A1A]">{formatDate(project.startDate)}</p>
+              </div>
+              <div className="space-y-1 text-sm">
+                <p className="text-xs font-semibold text-gray-500">
+                  <Calendar className="mr-1 inline-block h-3 w-3" />
+                  Estimated completion
+                </p>
+                <p className="text-[#1A1A1A]">
+                  {formatDate(project.estimatedEndDate)}
+                </p>
+              </div>
+              <div className="space-y-1 text-sm">
+                <p className="text-xs font-semibold text-gray-500">
+                  <DollarSign className="mr-1 inline-block h-3 w-3" />
+                  Budget
+                </p>
+                <p className="text-[#1A1A1A]">
+                  ${project.budget.toLocaleString()}
+                </p>
+                <p className="text-[11px] text-gray-500">
+                  Spent ${project.spent.toLocaleString()}
+                </p>
+              </div>
             </div>
           </div>
 
           {/* Updates */}
-          <div className="bg-white border border-gray-100 rounded-2xl p-4 space-y-3">
-            <div className="flex items-center justify-between">
-              <h2 className="text-xs font-black text-[#111827] uppercase tracking-[0.18em]">
-                Site Updates
-              </h2>
+          <div className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-black uppercase tracking-[0.18em] text-gray-400">
+                  Site updates
+                </h2>
+                <p className="mt-1 text-xs text-gray-500">
+                  Log progress notes and milestones.
+                </p>
+              </div>
             </div>
 
-            <form onSubmit={handleSubmitUpdate} className="space-y-2">
-              <textarea
-                value={updateText}
-                onChange={(e) => setUpdateText(e.target.value)}
-                rows={3}
-                className="w-full text-xs rounded-xl border border-gray-200 bg-white py-2 px-3 focus:border-care-orange focus:ring-0"
-                placeholder="Log a progress update, material delivery, or inspection note..."
-              />
-              <div className="flex justify-end">
-                <button
-                  type="submit"
-                  disabled={!updateText.trim() || updating}
-                  className="bg-[#1A1A1A] text-white px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 disabled:opacity-50"
-                >
-                  <CheckCircle size={14} />
-                  {updating ? 'Posting...' : 'Post Update'}
-                </button>
-              </div>
-            </form>
-
-            {project.updates && project.updates.length > 0 ? (
-              <div className="space-y-3 mt-2 max-h-64 overflow-y-auto">
-                {project.updates
-                  .slice()
-                  .sort(
-                    (a, b) =>
-                      new Date(b.createdAt).getTime() -
-                      new Date(a.createdAt).getTime()
-                  )
-                  .map((u) => (
-                    <div
-                      key={u.id}
-                      className="rounded-xl bg-gray-50 px-3 py-2 text-xs space-y-1"
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="font-semibold text-gray-900">
-                          {u.author}
-                        </span>
+            {updates.length === 0 ? (
+              <p className="text-sm text-gray-500">
+                No updates yet. Be the first to post a progress note.
+              </p>
+            ) : (
+              <ul className="space-y-3">
+                {updates.map((update) => (
+                  <li
+                    key={update.id}
+                    className="flex items-start gap-3 rounded-xl bg-[#FDEEE9]/40 px-3 py-3"
+                  >
+                    <div className="mt-1 h-2 w-2 rounded-full bg-care-orange" />
+                    <div>
+                      <p className="text-xs font-semibold text-gray-500">
+                        {update.author}{' '}
                         <span className="text-[10px] text-gray-400">
-                          {formatDate(u.createdAt)}
+                          {new Date(update.timestamp).toLocaleString()}
                         </span>
-                      </div>
-                      <p className="text-gray-700 whitespace-pre-wrap">
-                        {u.content}
+                      </p>
+                      <p className="text-sm text-[#1A1A1A]">
+                        {update.content}
                       </p>
                     </div>
-                  ))}
+                  </li>
+                ))}
+              </ul>
+            )}
+
+            {canEdit && (
+              <div className="mt-4 space-y-2 rounded-2xl border border-dashed border-gray-200 bg-[#FDEEE9]/30 p-3">
+                <label className="flex items-center gap-2 text-xs font-semibold text-gray-600">
+                  <Edit3 size={14} className="text-care-orange" />
+                  Post an update
+                </label>
+                <textarea
+                  value={updateContent}
+                  onChange={(e) => setUpdateContent(e.target.value)}
+                  rows={3}
+                  placeholder="Add a quick note about today’s progress..."
+                  className="w-full resize-none rounded-xl border border-gray-200 bg-white p-2 text-sm text-[#1A1A1A] outline-none focus:border-care-orange/70"
+                />
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={handleSubmitUpdate}
+                    disabled={postingUpdate || !updateContent.trim()}
+                    className="inline-flex items-center gap-2 rounded-xl bg-care-orange px-3 py-1.5 text-xs font-semibold text-white transition-all hover:shadow-md hover:shadow-care-orange/30 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-500"
+                  >
+                    {postingUpdate && (
+                      <Clock size={12} className="animate-spin" />
+                    )}
+                    Post update
+                  </button>
+                </div>
               </div>
-            ) : (
-              <p className="text-[11px] text-gray-400">
-                No updates yet. Use the box above to post your first site update.
-              </p>
             )}
           </div>
         </div>
 
-        {/* Right: Notes / Docs hint */}
-        <div className="bg-white border border-gray-100 rounded-2xl p-4 space-y-3">
-          <h2 className="text-xs font-black text-[#111827] uppercase tracking-[0.18em]">
-            Project Files
-          </h2>
-          <p className="text-xs text-gray-500">
-            Upload contracts, permits, and photos in the Documents tab so your team and client can
-            reference them anytime.
-          </p>
-          <div className="mt-2 rounded-xl border border-dashed border-gray-200 px-4 py-6 text-center text-xs text-gray-400">
-            <FileText size={18} className="mx-auto mb-2 text-care-orange" />
-            Manage files from the global Documents section.
+        {/* Side column */}
+        <div className="space-y-4">
+          {/* Status & progress */}
+          <div className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+            <h2 className="text-sm font-black uppercase tracking-[0.18em] text-gray-400">
+              Status & progress
+            </h2>
+
+            <div className="mt-4 space-y-4">
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-gray-500">
+                  Status
+                </label>
+                <select
+                  value={tempStatus}
+                  onChange={(e) =>
+                    setTempStatus(e.target.value as ProjectStatus)
+                  }
+                  disabled={!canEdit}
+                  className="w-full rounded-xl border border-gray-200 bg-white px-3 py-2 text-sm text-[#1A1A1A] outline-none focus:border-care-orange/70 disabled:cursor-not-allowed disabled:bg-gray-100"
+                >
+                  {statusOptions.map((status) => (
+                    <option key={status} value={status}>
+                      {status}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-xs text-gray-500">
+                  <span>Completion</span>
+                  <span className="font-semibold text-care-orange">
+                    {tempProgress}%
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  value={tempProgress}
+                  onChange={(e) => setTempProgress(Number(e.target.value))}
+                  disabled={!canEdit}
+                  className="w-full accent-care-orange disabled:cursor-not-allowed"
+                />
+              </div>
+
+              {canEdit && (
+                <button
+                  type="button"
+                  onClick={handleSaveStatus}
+                  disabled={saving}
+                  className="mt-1 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-care-orange px-3 py-2 text-xs font-semibold text-white transition-all hover:shadow-md hover:shadow-care-orange/30 disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-500"
+                >
+                  {saving && <Clock size={12} className="animate-spin" />}
+                  Save changes
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* People */}
+          <div className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+            <h2 className="text-sm font-black uppercase tracking-[0.18em] text-gray-400">
+              People
+            </h2>
+            <div className="mt-3 space-y-3 text-sm">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-care-orange/20 text-xs font-bold text-care-orange">
+                    <UserIcon size={14} />
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold text-gray-500">
+                      Client
+                    </p>
+                    <p className="text-sm font-semibold text-[#1A1A1A]">
+                      {client?.name || 'Not assigned'}
+                    </p>
+                  </div>
+                </div>
+                {client && (
+                  <button
+                    type="button"
+                    onClick={() => onMessage(client)}
+                    className="inline-flex items-center gap-1 rounded-xl bg-care-orange px-2.5 py-1.5 text-[11px] font-semibold text-white hover:shadow-md hover:shadow-care-orange/30"
+                  >
+                    <MessageSquare size={12} />
+                    Message
+                  </button>
+                )}
+              </div>
+
+              <div className="flex items-center justify-between gap-2 border-t border-gray-100 pt-3">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-care-orange/20 text-xs font-bold text-care-orange">
+                    <UserIcon size={14} />
+                  </div>
+                  <div>
+                    <p className="text-xs font-semibold text-gray-500">
+                      Contractor
+                    </p>
+                    <p className="text-sm font-semibold text-[#1A1A1A]">
+                      {contractor?.name || 'Not assigned'}
+                    </p>
+                  </div>
+                </div>
+                {contractor && (
+                  <button
+                    type="button"
+                    onClick={() => onMessage(contractor)}
+                    className="inline-flex items-center gap-1 rounded-xl bg-care-orange px-2.5 py-1.5 text-[11px] font-semibold text-white hover:shadow-md hover:shadow-care-orange/30"
+                  >
+                    <MessageSquare size={12} />
+                    Message
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
         </div>
       </section>

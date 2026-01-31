@@ -1,6 +1,13 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Send, Search, User as UserIcon, MessageSquare, ChevronLeft, ShieldCheck, HardHat, UserCircle, Loader2 } from 'lucide-react';
-import { User, UserRole, Message } from '../types';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  Send,
+  Search,
+  MessageSquare,
+  ChevronLeft,
+  AtSign,
+  Tag,
+} from 'lucide-react';
+import { User, Message } from '../types';
 
 interface MessagingProps {
   currentUser: User;
@@ -8,30 +15,102 @@ interface MessagingProps {
   messages: Message[];
   onSendMessage: (receiverId: string, content: string, projectId?: string) => Promise<void>;
   initialChatUser?: User | null;
+  activeProjectId?: string | null; // when opened from a project
 }
 
-const Messaging: React.FC<MessagingProps> = ({ currentUser, users, messages, onSendMessage, initialChatUser }) => {
+const Messaging: React.FC<MessagingProps> = ({
+  currentUser,
+  users,
+  messages,
+  onSendMessage,
+  initialChatUser,
+  activeProjectId,
+}) => {
   const [activeChat, setActiveChat] = useState<User | null>(initialChatUser || null);
   const [showContacts, setShowContacts] = useState(!initialChatUser);
   const [searchQuery, setSearchQuery] = useState('');
   const [inputText, setInputText] = useState('');
   const [sending, setSending] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // @mention state
+  const [mentionQuery, setMentionQuery] = useState('');
+  const [showMentionDropdown, setShowMentionDropdown] = useState(false);
+
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+
+  const otherUsers = useMemo(
+    () => users.filter((u) => u.id !== currentUser.id),
+    [users, currentUser.id]
+  );
+
+  // Group messages by contact to compute last message
+  const contactsWithMeta = useMemo(() => {
+    const map = new Map<string, Message[]>();
+
+    messages.forEach((m) => {
+      const isCurrentSender = m.senderId === currentUser.id;
+      const isCurrentReceiver = m.receiverId === currentUser.id;
+      if (!isCurrentSender && !isCurrentReceiver) return;
+
+      const otherId = isCurrentSender ? m.receiverId : m.senderId;
+      if (!otherId) return;
+
+      if (!map.has(otherId)) map.set(otherId, []);
+      map.get(otherId)!.push(m);
+    });
+
+    return otherUsers
+      .map((user) => {
+        const msgs = map.get(user.id) || [];
+        const last = msgs[msgs.length - 1];
+        return { user, lastMessage: last };
+      })
+      .sort((a, b) => {
+        if (a.lastMessage && b.lastMessage) {
+          return a.lastMessage.timestamp.localeCompare(b.lastMessage.timestamp);
+        }
+        if (a.lastMessage) return -1;
+        if (b.lastMessage) return 1;
+        return a.user.name.localeCompare(b.user.name);
+      });
+  }, [messages, currentUser.id, otherUsers]);
+
+  // Filter contacts by search
+  const filteredContacts = useMemo(() => {
+    if (!searchQuery.trim()) return contactsWithMeta;
+    const q = searchQuery.toLowerCase();
+    return contactsWithMeta.filter(
+      ({ user }) =>
+        user.name.toLowerCase().includes(q) ||
+        user.email.toLowerCase().includes(q)
+    );
+  }, [contactsWithMeta, searchQuery]);
+
+  // Messages for active chat (and optional project)
+  const chatMessages = useMemo(() => {
+    if (!activeChat) return [];
+    return messages.filter((m) => {
+      const isPair =
+        (m.senderId === currentUser.id && m.receiverId === activeChat.id) ||
+        (m.senderId === activeChat.id && m.receiverId === currentUser.id);
+
+      if (!isPair) return false;
+      if (activeProjectId) {
+        return m.projectId === activeProjectId;
+      }
+      return true;
+    });
+  }, [messages, currentUser.id, activeChat, activeProjectId]);
 
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
-
-  // Filter messages for active chat
-  const chatMessages = activeChat ? messages.filter(
-    m => (m.senderId === currentUser.id && m.receiverId === activeChat.id) ||
-         (m.senderId === activeChat.id && m.receiverId === currentUser.id)
-  ) : [];
 
   useEffect(() => {
     scrollToBottom();
-  }, [chatMessages.length, activeChat]);
+  }, [chatMessages.length]);
 
+  // If initialChatUser changes (e.g. coming from a user directory), sync
   useEffect(() => {
     if (initialChatUser) {
       setActiveChat(initialChatUser);
@@ -39,187 +118,303 @@ const Messaging: React.FC<MessagingProps> = ({ currentUser, users, messages, onS
     }
   }, [initialChatUser]);
 
-  const otherUsers = users.filter(u => u.id !== currentUser.id);
-  const filteredUsers = otherUsers.filter(u => 
-    u.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    u.email.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  // Handle @ mention query extraction
+  const updateMentionQuery = (value: string) => {
+    const atIndex = value.lastIndexOf('@');
+    if (atIndex === -1) {
+      setMentionQuery('');
+      setShowMentionDropdown(false);
+      return;
+    }
 
-  const handleSendMessage = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!inputText.trim() || !activeChat || sending) return;
+    const after = value.slice(atIndex + 1);
+    const match = after.match(/^([^\s@]{1,30})/); // up to first space/@
+    const query = match ? match[1] : '';
 
+    if (query.length === 0) {
+      setMentionQuery('');
+      setShowMentionDropdown(false);
+      return;
+    }
+
+    setMentionQuery(query.toLowerCase());
+    setShowMentionDropdown(true);
+  };
+
+  const handleInputChange = (value: string) => {
+    setInputText(value);
+    updateMentionQuery(value);
+  };
+
+  const mentionSuggestions = useMemo(() => {
+    if (!mentionQuery) return [];
+    const q = mentionQuery.toLowerCase();
+    return users
+      .filter((u) => u.id !== currentUser.id)
+      .filter(
+        (u) =>
+          u.name.toLowerCase().includes(q) ||
+          u.email.toLowerCase().includes(q)
+      )
+      .slice(0, 5);
+  }, [mentionQuery, users, currentUser.id]);
+
+  const handleSelectMention = (user: User) => {
+    const value = inputText;
+    const atIndex = value.lastIndexOf('@');
+    if (atIndex === -1) return;
+
+    const before = value.slice(0, atIndex);
+    const after = value.slice(atIndex);
+    const match = after.match(/^@[^\s@]*/);
+    const rest = match ? after.slice(match[0].length) : '';
+
+    const newValue = `${before}@${user.name}${rest || ' '}`;
+    setInputText(newValue);
+    setShowMentionDropdown(false);
+  };
+
+  const handleSend = async () => {
+    if (!activeChat || !inputText.trim() || sending) return;
+    const content = inputText.trim();
     setSending(true);
     try {
-      await onSendMessage(activeChat.id, inputText.trim());
+      await onSendMessage(activeChat.id, content, activeProjectId || undefined);
       setInputText('');
-    } catch (error) {
-      console.error('Failed to send message:', error);
+      setShowMentionDropdown(false);
+      setMentionQuery('');
     } finally {
       setSending(false);
     }
   };
 
-  const getRoleIcon = (role: UserRole) => {
-    switch (role) {
-      case UserRole.ADMIN: return <ShieldCheck size={12} className="text-purple-500" />;
-      case UserRole.CONTRACTOR: return <HardHat size={12} className="text-care-orange" />;
-      default: return <UserCircle size={12} className="text-green-500" />;
+  const handleKeyDown: React.KeyboardEventHandler<HTMLTextAreaElement> = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSend();
     }
   };
 
-  // Get user avatar with fallback
-  const getUserAvatar = (user: User) => {
-    return user.avatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(user.name)}&background=F15A2B&color=fff`;
+  const formatTime = (timestamp: string) => {
+    try {
+      return new Date(timestamp).toLocaleTimeString(undefined, {
+        hour: 'numeric',
+        minute: '2-digit',
+      });
+    } catch {
+      return '';
+    }
   };
 
   return (
-    <div className="h-[calc(100vh-12rem)] bg-white rounded-3xl shadow-xl border border-gray-100 overflow-hidden flex">
-      {/* Contacts Sidebar */}
-      <div className={`
-        w-full md:w-80 border-r border-gray-100 flex flex-col
-        ${showContacts ? 'block' : 'hidden md:flex'}
-      `}>
-        <div className="p-4 border-b border-gray-100">
-          <h2 className="text-lg font-black mb-4">Messages</h2>
+    <div className="h-full flex flex-col md:flex-row bg-white rounded-2xl border border-gray-100 overflow-hidden">
+      {/* CONTACTS PANEL */}
+      <div
+        className={`w-full md:w-72 border-r border-gray-100 bg-white flex-shrink-0 flex flex-col ${
+          showContacts ? 'block' : 'hidden md:flex'
+        }`}
+      >
+        <div className="p-4 border-b border-gray-100 flex items-center justify-between">
+          <div>
+            <p className="text-[10px] font-black text-gray-400 uppercase tracking-[0.18em]">
+              Inbox
+            </p>
+            <p className="text-sm font-bold text-gray-900">Messages</p>
+          </div>
+        </div>
+
+        <div className="p-3">
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
+              <Search size={16} />
+            </span>
             <input
               type="text"
-              placeholder="Search contacts..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 bg-gray-50 border border-gray-100 rounded-xl focus:border-care-orange focus:ring-0 transition-all text-sm"
+              placeholder="Search contacts"
+              className="w-full pl-9 pr-3 py-2 text-xs rounded-xl border border-gray-200 bg-white focus:border-care-orange focus:ring-0"
             />
           </div>
         </div>
 
         <div className="flex-1 overflow-y-auto">
-          {filteredUsers.length > 0 ? (
-            filteredUsers.map(user => (
-              <button
-                key={user.id}
-                onClick={() => {
-                  setActiveChat(user);
-                  setShowContacts(false);
-                }}
-                className={`
-                  w-full flex items-center gap-3 p-4 hover:bg-gray-50 transition-all text-left border-b border-gray-50
-                  ${activeChat?.id === user.id ? 'bg-care-orange/5 border-l-4 border-l-care-orange' : ''}
-                `}
-              >
-                <div className="relative">
-                  <img 
-                    src={getUserAvatar(user)} 
-                    alt={user.name}
-                    className="w-12 h-12 rounded-xl object-cover"
-                  />
-                  <div className="absolute -bottom-1 -right-1 bg-white rounded-full p-0.5">
-                    {getRoleIcon(user.role)}
-                  </div>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-bold text-gray-900 truncate">{user.name}</p>
-                  <p className="text-xs text-gray-500 truncate">{user.role}</p>
-                </div>
-              </button>
-            ))
-          ) : (
-            <div className="p-8 text-center text-gray-400">
-              <UserIcon size={40} className="mx-auto mb-3 opacity-30" />
-              <p className="text-sm">No contacts found</p>
+          {filteredContacts.length === 0 && (
+            <div className="p-6 text-xs text-gray-400 text-center">
+              No contacts found.
             </div>
           )}
+
+          {filteredContacts.map(({ user, lastMessage }) => (
+            <button
+              key={user.id}
+              onClick={() => {
+                setActiveChat(user);
+                setShowContacts(false);
+              }}
+              className={`w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-gray-50 transition-colors ${
+                activeChat?.id === user.id ? 'bg-care-orange/5' : ''
+              }`}
+            >
+              <div className="h-9 w-9 rounded-xl bg-gray-100 flex items-center justify-center text-xs font-semibold text-gray-700">
+                {user.name.charAt(0).toUpperCase()}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-semibold text-gray-900 truncate">
+                  {user.name}
+                </p>
+                {lastMessage && (
+                  <p className="text-[11px] text-gray-500 truncate">
+                    {lastMessage.senderId === currentUser.id ? 'You: ' : ''}
+                    {lastMessage.content}
+                  </p>
+                )}
+              </div>
+              {lastMessage && (
+                <span className="text-[10px] text-gray-400 ml-2">
+                  {formatTime(lastMessage.timestamp)}
+                </span>
+              )}
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* Chat Area */}
-      <div className={`
-        flex-1 flex flex-col
-        ${!showContacts ? 'block' : 'hidden md:flex'}
-      `}>
+      {/* CHAT PANEL */}
+      <div className="flex-1 flex flex-col bg-white">
         {activeChat ? (
           <>
-            {/* Chat Header */}
+            {/* Header */}
             <div className="p-4 border-b border-gray-100 flex items-center gap-3">
-              <button 
+              <button
                 onClick={() => setShowContacts(true)}
                 className="md:hidden p-2 hover:bg-gray-100 rounded-lg"
               >
                 <ChevronLeft size={20} />
               </button>
-              <img 
-                src={getUserAvatar(activeChat)} 
-                alt={activeChat.name}
-                className="w-10 h-10 rounded-xl object-cover"
-              />
-              <div>
-                <p className="font-bold">{activeChat.name}</p>
-                <p className="text-xs text-gray-500 flex items-center gap-1">
-                  {getRoleIcon(activeChat.role)}
-                  {activeChat.role}
-                </p>
+              <div className="h-10 w-10 rounded-xl bg-gray-100 flex items-center justify-center text-sm font-semibold text-gray-700">
+                {activeChat.name.charAt(0).toUpperCase()}
+              </div>
+              <div className="flex flex-col">
+                <span className="text-sm font-bold text-gray-900">
+                  {activeChat.name}
+                </span>
+                <span className="text-[11px] text-gray-500">{activeChat.email}</span>
+              </div>
+              <div className="ml-auto flex items-center gap-2">
+                {activeProjectId && (
+                  <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full bg-care-orange/10 text-care-orange text-[10px] font-semibold">
+                    <Tag size={12} />
+                    Project thread
+                  </span>
+                )}
               </div>
             </div>
 
             {/* Messages */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
-              {chatMessages.length > 0 ? (
-                chatMessages.map(msg => (
-                  <div
-                    key={msg.id}
-                    className={`flex ${msg.senderId === currentUser.id ? 'justify-end' : 'justify-start'}`}
-                  >
-                    <div className={`
-                      max-w-[70%] p-4 rounded-2xl
-                      ${msg.senderId === currentUser.id 
-                        ? 'bg-care-orange text-white rounded-br-sm' 
-                        : 'bg-white text-gray-900 rounded-bl-sm shadow-sm'}
-                    `}>
-                      <p className="text-sm">{msg.content}</p>
-                      <p className={`text-[10px] mt-1 ${msg.senderId === currentUser.id ? 'text-white/60' : 'text-gray-400'}`}>
-                        {new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </p>
-                    </div>
-                  </div>
-                ))
-              ) : (
-                <div className="h-full flex items-center justify-center text-gray-400">
-                  <div className="text-center">
-                    <MessageSquare size={48} className="mx-auto mb-3 opacity-30" />
-                    <p>Start a conversation with {activeChat.name}</p>
-                  </div>
+            <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3 bg-gray-50/60">
+              {chatMessages.length === 0 && (
+                <div className="h-full flex items-center justify-center text-xs text-gray-400">
+                  No messages yet. Start the conversation.
                 </div>
               )}
+
+              {chatMessages.map((m) => {
+                const isMine = m.senderId === currentUser.id;
+                return (
+                  <div
+                    key={m.id}
+                    className={`flex ${isMine ? 'justify-end' : 'justify-start'}`}
+                  >
+                    <div
+                      className={`max-w-[75%] rounded-2xl px-3 py-2 text-xs leading-relaxed shadow-sm ${
+                        isMine
+                          ? 'bg-care-orange text-white rounded-br-sm'
+                          : 'bg-white text-gray-900 rounded-bl-sm'
+                      }`}
+                    >
+                      <p className="whitespace-pre-wrap break-words">
+                        {m.content}
+                      </p>
+                      <div
+                        className={`mt-1 text-[10px] ${
+                          isMine ? 'text-white/80 text-right' : 'text-gray-400'
+                        }`}
+                      >
+                        {formatTime(m.timestamp)}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
               <div ref={messagesEndRef} />
             </div>
 
-            {/* Message Input */}
-            <form onSubmit={handleSendMessage} className="p-4 border-t border-gray-100 bg-white">
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={inputText}
-                  onChange={(e) => setInputText(e.target.value)}
-                  placeholder="Type a message..."
-                  className="flex-1 px-4 py-3 bg-gray-50 border border-gray-100 rounded-xl focus:border-care-orange focus:ring-0 transition-all"
-                />
+            {/* Input */}
+            <div className="border-t border-gray-100 p-3 bg-white relative">
+              {/* mention dropdown */}
+              {showMentionDropdown && mentionSuggestions.length > 0 && (
+                <div className="absolute bottom-14 left-3 right-3 bg-white border border-gray-200 rounded-xl shadow-lg max-h-40 overflow-y-auto z-10">
+                  {mentionSuggestions.map((u) => (
+                    <button
+                      key={u.id}
+                      type="button"
+                      onClick={() => handleSelectMention(u)}
+                      className="w-full px-3 py-2 text-left text-xs hover:bg-gray-50 flex items-center gap-2"
+                    >
+                      <div className="h-7 w-7 rounded-full bg-gray-100 flex items-center justify-center text-[11px] font-semibold text-gray-700">
+                        {u.name.charAt(0).toUpperCase()}
+                      </div>
+                      <div className="flex flex-col">
+                        <span className="text-xs font-semibold text-gray-900">
+                          {u.name}
+                        </span>
+                        <span className="text-[10px] text-gray-500">
+                          {u.email}
+                        </span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <div className="flex items-end gap-2">
+                <div className="flex-1 relative">
+                  <textarea
+                    value={inputText}
+                    onChange={(e) => handleInputChange(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                    rows={1}
+                    className="w-full text-xs rounded-xl border border-gray-200 bg-white py-2 pl-3 pr-9 resize-none focus:border-care-orange focus:ring-0"
+                    placeholder={
+                      activeProjectId
+                        ? "Message about this project... use @ to mention someone"
+                        : "Type a message... use @ to mention someone"
+                    }
+                  />
+                  <span className="absolute right-2 bottom-2 text-gray-400">
+                    <AtSign size={14} />
+                  </span>
+                </div>
                 <button
-                  type="submit"
-                  disabled={!inputText.trim() || sending}
-                  className="px-6 py-3 bg-care-orange text-white rounded-xl font-bold disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 hover:bg-orange-600 transition-all"
+                  onClick={handleSend}
+                  disabled={!inputText.trim() || sending || !activeChat}
+                  className="h-9 w-9 rounded-full bg-care-orange flex items-center justify-center text-white disabled:opacity-50 disabled:cursor-not-allowed shadow-md shadow-care-orange/40 hover:shadow-care-orange/60 transition-all"
                 >
-                  {sending ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
+                  <Send size={14} />
                 </button>
               </div>
-            </form>
+            </div>
           </>
         ) : (
-          <div className="flex-1 flex items-center justify-center text-gray-400">
+          // No chat selected
+          <div className="flex-1 flex items-center justify-center text-gray-400 bg-gray-50/60">
             <div className="text-center">
-              <MessageSquare size={64} className="mx-auto mb-4 opacity-30" />
-              <p className="text-lg font-bold">Select a conversation</p>
-              <p className="text-sm">Choose a contact to start messaging</p>
+              <MessageSquare size={48} className="mx-auto mb-4 opacity-40" />
+              <p className="text-sm font-bold text-gray-700">Select a conversation</p>
+              <p className="text-xs text-gray-400">
+                Choose a contact from the left to start messaging.
+              </p>
             </div>
           </div>
         )}

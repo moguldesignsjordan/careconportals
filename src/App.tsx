@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from './context/AuthContext';
-import { User, UserRole, Project, Document as ProjectDocument, Message } from './types';
+import { User, UserRole, Project, Document as ProjectDocument, Message, Milestone } from './types';
 import {
   subscribeToProjects,
   subscribeToUsers,
@@ -13,6 +13,16 @@ import {
   sendMessage,
   updateProjectStatus,
   addProjectUpdate,
+  uploadProjectUpdateImage,
+  addMilestone,
+  updateMilestone,
+  addMilestoneComment,
+  uploadMilestoneImage,
+  subscribeToCalendarEvents,
+  createCalendarEvent,
+  updateCalendarEvent,
+  deleteCalendarEvent,
+  CalendarEvent,
 } from './services/db';
 
 // Components
@@ -21,6 +31,9 @@ import DashboardAdmin from './components/DashboardAdmin';
 import DashboardContractor from './components/DashboardContractor';
 import DashboardClient from './components/DashboardClient';
 import ProjectDetails from './components/ProjectDetails';
+import ProjectsHub from './components/ProjectsHub';
+import ProjectTimeline from './components/ProjectTimeline';
+import CalendarPage from './components/CalendarPage';
 import CreateProjectModal from './components/CreateProjectModal';
 import CreateClientModal from './components/CreateClientModal';
 import CreateContractorModal from './components/CreateContractorModal';
@@ -31,12 +44,13 @@ import SettingsPage from './components/SettingsPage';
 import LoginPage from './components/LoginPage';
 
 // Icons
-import { Loader2, Menu, CheckCircle, XCircle, Info } from 'lucide-react';
+import { Loader2, Menu, CheckCircle, XCircle, Info, ArrowLeft, LayoutGrid, Clock } from 'lucide-react';
 
 type ViewType =
   | 'dashboard'
   | 'projects'
   | 'project-details'
+  | 'project-timeline'
   | 'messages'
   | 'documents'
   | 'directory'
@@ -57,6 +71,7 @@ const App: React.FC = () => {
   const [users, setUsers] = useState<User[]>([]);
   const [documents, setDocuments] = useState<ProjectDocument[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
   const [dataLoading, setDataLoading] = useState(true);
 
   // UI state
@@ -64,6 +79,7 @@ const App: React.FC = () => {
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [chatUser, setChatUser] = useState<User | null>(null);
+  const [projectViewMode, setProjectViewMode] = useState<'details' | 'timeline'>('details');
 
   // Modal state
   const [showCreateProject, setShowCreateProject] = useState(false);
@@ -99,11 +115,16 @@ const App: React.FC = () => {
       setMessages(data as Message[]);
     });
 
+    const unsubCalendar = subscribeToCalendarEvents(user.id, user.role, (data) => {
+      setCalendarEvents(data);
+    });
+
     return () => {
       unsubProjects();
       unsubUsers();
       unsubDocs();
       unsubMessages();
+      unsubCalendar();
     };
   }, [user]);
 
@@ -127,12 +148,18 @@ const App: React.FC = () => {
   const handleSelectProject = (project: Project) => {
     setSelectedProject(project);
     setCurrentView('project-details');
+    setProjectViewMode('details');
     setSidebarOpen(false);
   };
 
   const handleBackToDashboard = () => {
     setSelectedProject(null);
     setCurrentView('dashboard');
+  };
+
+  const handleBackToProjects = () => {
+    setSelectedProject(null);
+    setCurrentView('projects');
   };
 
   const handleCreateProject = async (
@@ -221,13 +248,95 @@ const App: React.FC = () => {
     }
   };
 
-  const handleAddProjectUpdate = async (projectId: string, content: string) => {
+  const handleAddProjectUpdate = async (
+    projectId: string,
+    content: string,
+    imageFile?: File | null
+  ) => {
     if (!user) return;
     try {
-      await addProjectUpdate(projectId, content, user.name);
+      let imageUrl: string | undefined;
+
+      if (imageFile) {
+        imageUrl = await uploadProjectUpdateImage(projectId, imageFile);
+      }
+
+      await addProjectUpdate(projectId, content, user.name, imageUrl);
       showToast('Update posted!', 'success');
     } catch (error: any) {
       showToast(error.message || 'Failed to post update', 'error');
+      throw error;
+    }
+  };
+
+  // Milestone handlers
+  const handleAddMilestone = async (
+    projectId: string,
+    milestone: Omit<Milestone, 'id' | 'comments'>
+  ) => {
+    try {
+      await addMilestone(projectId, milestone);
+      showToast('Milestone added!', 'success');
+    } catch (error: any) {
+      showToast(error.message || 'Failed to add milestone', 'error');
+      throw error;
+    }
+  };
+
+  const handleUpdateMilestone = async (
+    projectId: string,
+    milestoneId: string,
+    updates: Partial<Milestone>
+  ) => {
+    try {
+      await updateMilestone(projectId, milestoneId, updates);
+      showToast('Milestone updated!', 'success');
+    } catch (error: any) {
+      showToast(error.message || 'Failed to update milestone', 'error');
+      throw error;
+    }
+  };
+
+  const handleAddMilestoneComment = async (
+    projectId: string,
+    milestoneId: string,
+    content: string,
+    imageFile?: File | null
+  ) => {
+    if (!user) return;
+    try {
+      let imageUrl: string | undefined;
+      if (imageFile) {
+        imageUrl = await uploadMilestoneImage(projectId, milestoneId, imageFile);
+      }
+      await addMilestoneComment(projectId, milestoneId, user.id, user.name, content, imageUrl);
+      showToast('Comment added!', 'success');
+    } catch (error: any) {
+      showToast(error.message || 'Failed to add comment', 'error');
+      throw error;
+    }
+  };
+
+  const handleUploadMilestoneImage = async (
+    projectId: string,
+    milestoneId: string,
+    file: File
+  ): Promise<string> => {
+    try {
+      const url = await uploadMilestoneImage(projectId, milestoneId, file);
+      // Also add the image to the milestone's imageUrls array
+      const project = projects.find(p => p.id === projectId);
+      const milestone = project?.milestones?.find(m => m.id === milestoneId);
+      if (milestone) {
+        const currentImages = milestone.imageUrls || [];
+        await updateMilestone(projectId, milestoneId, {
+          imageUrls: [...currentImages, url]
+        });
+      }
+      showToast('Image uploaded!', 'success');
+      return url;
+    } catch (error: any) {
+      showToast(error.message || 'Failed to upload image', 'error');
       throw error;
     }
   };
@@ -248,6 +357,42 @@ const App: React.FC = () => {
     }
     setCurrentView('messages');
     setSidebarOpen(false);
+  };
+
+  // Calendar event handlers
+  const handleCreateCalendarEvent = async (
+    eventData: Omit<CalendarEvent, 'id' | 'createdAt'>
+  ) => {
+    try {
+      await createCalendarEvent(eventData);
+      showToast('Event created!', 'success');
+    } catch (error: any) {
+      showToast(error.message || 'Failed to create event', 'error');
+      throw error;
+    }
+  };
+
+  const handleUpdateCalendarEvent = async (
+    eventId: string,
+    updates: Partial<CalendarEvent>
+  ) => {
+    try {
+      await updateCalendarEvent(eventId, updates);
+      showToast('Event updated!', 'success');
+    } catch (error: any) {
+      showToast(error.message || 'Failed to update event', 'error');
+      throw error;
+    }
+  };
+
+  const handleDeleteCalendarEvent = async (eventId: string) => {
+    try {
+      await deleteCalendarEvent(eventId);
+      showToast('Event deleted', 'info');
+    } catch (error: any) {
+      showToast(error.message || 'Failed to delete event', 'error');
+      throw error;
+    }
   };
 
   // Loading state
@@ -273,23 +418,83 @@ const App: React.FC = () => {
   // Render current view
   const renderView = () => {
     switch (currentView) {
-      case 'project-details': {
+      case 'project-details':
+      case 'project-timeline': {
         if (!selectedProject) {
           setCurrentView('dashboard');
           return null;
         }
         const currentProject =
           projects.find((p) => p.id === selectedProject.id) || selectedProject;
+        
         return (
-          <ProjectDetails
-            project={currentProject}
-            users={users}
-            currentUser={user}
-            onBack={handleBackToDashboard}
-            onUpdateStatus={handleUpdateProjectStatus}
-            onAddUpdate={handleAddProjectUpdate}
-            onMessage={handleOpenMessages}
-          />
+          <div className="space-y-4">
+            {/* View Toggle Header */}
+            <div className="flex items-center justify-between">
+              <button
+                onClick={handleBackToProjects}
+                className="flex items-center gap-2 text-sm text-gray-500 hover:text-care-orange transition-colors"
+              >
+                <ArrowLeft size={16} />
+                Back to Projects
+              </button>
+              
+              {/* View Mode Toggle */}
+              <div className="flex items-center bg-gray-100 rounded-xl p-1">
+                <button
+                  onClick={() => setProjectViewMode('details')}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all ${
+                    projectViewMode === 'details'
+                      ? 'bg-white text-gray-900 shadow-sm'
+                      : 'text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  <LayoutGrid size={14} />
+                  Details
+                </button>
+                <button
+                  onClick={() => setProjectViewMode('timeline')}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all ${
+                    projectViewMode === 'timeline'
+                      ? 'bg-white text-gray-900 shadow-sm'
+                      : 'text-gray-500 hover:text-gray-700'
+                  }`}
+                >
+                  <Clock size={14} />
+                  Timeline
+                </button>
+              </div>
+            </div>
+
+            {/* Render based on view mode */}
+            {projectViewMode === 'timeline' ? (
+              <ProjectTimeline
+                project={currentProject}
+                currentUser={user}
+                milestones={currentProject.milestones || []}
+                onAddMilestone={(milestone) => handleAddMilestone(currentProject.id, milestone)}
+                onUpdateMilestone={(milestoneId, updates) => 
+                  handleUpdateMilestone(currentProject.id, milestoneId, updates)
+                }
+                onAddComment={(milestoneId, content, imageFile) =>
+                  handleAddMilestoneComment(currentProject.id, milestoneId, content, imageFile)
+                }
+                onUploadMilestoneImage={(milestoneId, file) =>
+                  handleUploadMilestoneImage(currentProject.id, milestoneId, file)
+                }
+              />
+            ) : (
+              <ProjectDetails
+                project={currentProject}
+                users={users}
+                currentUser={user}
+                onBack={handleBackToProjects}
+                onUpdateStatus={handleUpdateProjectStatus}
+                onAddUpdate={handleAddProjectUpdate}
+                onMessage={handleOpenMessages}
+              />
+            )}
+          </div>
         );
       }
 
@@ -331,51 +536,26 @@ const App: React.FC = () => {
 
       case 'calendar':
         return (
-          <div className="bg-white rounded-2xl p-8 text-center">
-            <h2 className="text-xl font-black mb-4">Calendar</h2>
-            <p className="text-gray-500">Calendar view coming soon...</p>
-          </div>
+          <CalendarPage
+            events={calendarEvents}
+            projects={projects}
+            users={users}
+            currentUser={user}
+            onCreateEvent={handleCreateCalendarEvent}
+            onUpdateEvent={handleUpdateCalendarEvent}
+            onDeleteEvent={handleDeleteCalendarEvent}
+          />
         );
 
       case 'projects':
         return (
-          <div className="space-y-6">
-            <div className="flex justify-between items-center">
-              <h1 className="text-2xl font-black">All Projects</h1>
-              <button
-                onClick={() => setShowCreateProject(true)}
-                className="bg-care-orange text-white px-4 py-2 rounded-xl font-bold text-sm"
-              >
-                + New Project
-              </button>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {projects.map((p) => (
-                <div
-                  key={p.id}
-                  onClick={() => handleSelectProject(p)}
-                  className="bg-white p-5 rounded-2xl border border-gray-100 cursor-pointer hover:shadow-md hover:border-care-orange/20 transition-all"
-                >
-                  <h3 className="font-bold text-gray-900">{p.title}</h3>
-                  <p className="text-sm text-gray-500 mt-1">{p.status}</p>
-                  <div className="mt-3 h-2 bg-gray-100 rounded-full overflow-hidden">
-                    <div
-                      className="h-full bg-care-orange rounded-full transition-all"
-                      style={{ width: `${p.progress}%` }}
-                    />
-                  </div>
-                  <p className="text-xs text-gray-400 mt-2">
-                    {p.progress}% complete
-                  </p>
-                </div>
-              ))}
-              {projects.length === 0 && (
-                <div className="col-span-full text-center py-12 text-gray-500">
-                  No projects yet. Create your first project!
-                </div>
-              )}
-            </div>
-          </div>
+          <ProjectsHub
+            projects={projects}
+            users={users}
+            currentUser={user}
+            onProjectClick={handleSelectProject}
+            onCreateProject={() => setShowCreateProject(true)}
+          />
         );
 
       case 'dashboard':

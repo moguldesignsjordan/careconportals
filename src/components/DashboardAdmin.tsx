@@ -10,7 +10,7 @@ import {
   HardHat,
   MessageSquare,
 } from 'lucide-react';
-import ProjectCard from './ProjectCard';
+import ProjectCard from './EnhancedProjectCard';
 
 interface DashboardAdminProps {
   projects: Project[];

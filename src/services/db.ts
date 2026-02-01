@@ -17,7 +17,7 @@ import {
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import { db, storage } from "../lib/firebase";
-import { Project, ProjectStatus, User, UserRole, Document as ProjectDocument } from '../types';
+import { Project, ProjectStatus, User, UserRole, Document as ProjectDocument, Milestone, MilestoneComment } from '../types';
 
 // ============ PROJECTS ============
 
@@ -52,6 +52,7 @@ export const createProject = async (projectData: Omit<Project, 'id' | 'updates' 
       progress: projectData.progress || 0,
       status: projectData.status || ProjectStatus.PLANNING,
       updates: [],
+      milestones: [],
       spent: projectData.spent || 0
     });
     return { id: docRef.id, ...projectData };
@@ -81,22 +82,33 @@ export const updateProjectStatus = async (projectId: string, status: ProjectStat
   }
 };
 
-export const addProjectUpdate = async (projectId: string, content: string, authorName: string, imageUrl?: string) => {
+export const addProjectUpdate = async (
+  projectId: string,
+  content: string,
+  authorName: string,
+  imageUrl?: string
+) => {
   try {
     const projectRef = doc(db, 'projects', projectId);
-    const newUpdate = {
+
+    const newUpdate: any = {
       id: Math.random().toString(36).substr(2, 9),
       timestamp: new Date().toISOString(),
       author: authorName,
       content,
-      imageUrl
     };
+    
+    if (imageUrl) {
+      newUpdate.imageUrl = imageUrl;
+    }
+
     await updateDoc(projectRef, {
-      updates: arrayUnion(newUpdate)
+      updates: arrayUnion(newUpdate),
     });
+
     return newUpdate;
   } catch (error) {
-    console.error("Error adding project update:", error);
+    console.error('Error adding project update:', error);
     throw error;
   }
 };
@@ -106,6 +118,183 @@ export const deleteProject = async (projectId: string) => {
     await deleteDoc(doc(db, 'projects', projectId));
   } catch (error) {
     console.error("Error deleting project:", error);
+    throw error;
+  }
+};
+
+// ============ PROJECT UPDATE IMAGES ============
+
+export const uploadProjectUpdateImage = async (projectId: string, file: File): Promise<string> => {
+  try {
+    const storageRef = ref(storage, `project-updates/${projectId}/${Date.now()}_${file.name}`);
+    const snapshot = await uploadBytes(storageRef, file);
+    const downloadUrl = await getDownloadURL(snapshot.ref);
+    return downloadUrl;
+  } catch (error) {
+    console.error("Error uploading project update image:", error);
+    throw error;
+  }
+};
+
+// ============ MILESTONES ============
+
+export const addMilestone = async (
+  projectId: string,
+  milestone: Omit<Milestone, 'id' | 'comments'>
+) => {
+  try {
+    const projectRef = doc(db, 'projects', projectId);
+    
+    const newMilestone: Milestone = {
+      ...milestone,
+      id: Math.random().toString(36).substr(2, 9),
+      comments: [],
+      imageUrls: milestone.imageUrls || [],
+    };
+
+    await updateDoc(projectRef, {
+      milestones: arrayUnion(newMilestone),
+    });
+
+    return newMilestone;
+  } catch (error) {
+    console.error('Error adding milestone:', error);
+    throw error;
+  }
+};
+
+export const updateMilestone = async (
+  projectId: string,
+  milestoneId: string,
+  updates: Partial<Milestone>
+) => {
+  try {
+    const projectRef = doc(db, 'projects', projectId);
+    const projectDoc = await getDoc(projectRef);
+    
+    if (!projectDoc.exists()) {
+      throw new Error('Project not found');
+    }
+
+    const projectData = projectDoc.data();
+    const milestones = projectData.milestones || [];
+    
+    const updatedMilestones = milestones.map((m: Milestone) => 
+      m.id === milestoneId 
+        ? { ...m, ...updates }
+        : m
+    );
+
+    await updateDoc(projectRef, { milestones: updatedMilestones });
+  } catch (error) {
+    console.error('Error updating milestone:', error);
+    throw error;
+  }
+};
+
+export const deleteMilestone = async (projectId: string, milestoneId: string) => {
+  try {
+    const projectRef = doc(db, 'projects', projectId);
+    const projectDoc = await getDoc(projectRef);
+    
+    if (!projectDoc.exists()) {
+      throw new Error('Project not found');
+    }
+
+    const projectData = projectDoc.data();
+    const milestones = (projectData.milestones || []).filter(
+      (m: Milestone) => m.id !== milestoneId
+    );
+
+    await updateDoc(projectRef, { milestones });
+  } catch (error) {
+    console.error('Error deleting milestone:', error);
+    throw error;
+  }
+};
+
+export const addMilestoneComment = async (
+  projectId: string,
+  milestoneId: string,
+  authorId: string,
+  authorName: string,
+  content: string,
+  imageUrl?: string
+) => {
+  try {
+    const projectRef = doc(db, 'projects', projectId);
+    const projectDoc = await getDoc(projectRef);
+    
+    if (!projectDoc.exists()) {
+      throw new Error('Project not found');
+    }
+
+    const projectData = projectDoc.data();
+    const milestones = projectData.milestones || [];
+    
+    const newComment: MilestoneComment = {
+      id: Math.random().toString(36).substr(2, 9),
+      author: authorName,
+      authorId,
+      content,
+      timestamp: new Date().toISOString(),
+    };
+
+    if (imageUrl) {
+      newComment.imageUrl = imageUrl;
+    }
+
+    const updatedMilestones = milestones.map((m: Milestone) => {
+      if (m.id === milestoneId) {
+        return {
+          ...m,
+          comments: [...(m.comments || []), newComment],
+        };
+      }
+      return m;
+    });
+
+    await updateDoc(projectRef, { milestones: updatedMilestones });
+    return newComment;
+  } catch (error) {
+    console.error('Error adding milestone comment:', error);
+    throw error;
+  }
+};
+
+export const uploadMilestoneImage = async (
+  projectId: string,
+  milestoneId: string,
+  file: File
+): Promise<string> => {
+  try {
+    const storageRef = ref(
+      storage, 
+      `milestones/${projectId}/${milestoneId}/${Date.now()}_${file.name}`
+    );
+    const snapshot = await uploadBytes(storageRef, file);
+    const downloadUrl = await getDownloadURL(snapshot.ref);
+    return downloadUrl;
+  } catch (error) {
+    console.error("Error uploading milestone image:", error);
+    throw error;
+  }
+};
+
+// ============ PROJECT COVER IMAGE ============
+
+export const uploadProjectCoverImage = async (projectId: string, file: File): Promise<string> => {
+  try {
+    const storageRef = ref(storage, `project-covers/${projectId}/${Date.now()}_${file.name}`);
+    const snapshot = await uploadBytes(storageRef, file);
+    const downloadUrl = await getDownloadURL(snapshot.ref);
+    
+    // Update project's cover image in Firestore
+    await updateProject(projectId, { coverImage: downloadUrl });
+    
+    return downloadUrl;
+  } catch (error) {
+    console.error("Error uploading project cover image:", error);
     throw error;
   }
 };
@@ -323,3 +512,95 @@ function formatFileSize(bytes: number): string {
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
+
+// ============ CALENDAR EVENTS ============
+
+export interface CalendarEvent {
+  id: string;
+  title: string;
+  description?: string;
+  date: string;
+  startTime: string;
+  endTime?: string;
+  location?: string;
+  type: 'inspection' | 'meeting' | 'delivery' | 'site-visit' | 'deadline' | 'other';
+  projectId?: string;
+  attendeeIds: string[];
+  createdBy: string;
+  createdAt: string;
+}
+
+export const subscribeToCalendarEvents = (
+  userId: string,
+  userRole: string,
+  callback: (events: CalendarEvent[]) => void
+) => {
+  // Admins see all events, others see events they created or are attendees of
+  let q;
+  if (userRole === 'ADMIN' || userRole === 'admin') {
+    q = query(collection(db, 'calendarEvents'), orderBy('date', 'asc'));
+  } else {
+    // For non-admins, we'll fetch all and filter client-side
+    // (Firestore doesn't support OR queries across different fields easily)
+    q = query(collection(db, 'calendarEvents'), orderBy('date', 'asc'));
+  }
+
+  return onSnapshot(q, (snapshot) => {
+    let events = snapshot.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    } as CalendarEvent));
+    
+    // Filter for non-admins
+    if (userRole !== 'ADMIN' && userRole !== 'admin') {
+      events = events.filter(e => 
+        e.createdBy === userId || 
+        e.attendeeIds.includes(userId)
+      );
+    }
+    
+    callback(events);
+  }, (error) => {
+    console.error("Error fetching calendar events:", error);
+    callback([]);
+  });
+};
+
+export const createCalendarEvent = async (
+  eventData: Omit<CalendarEvent, 'id' | 'createdAt'>
+): Promise<CalendarEvent> => {
+  try {
+    const docData = {
+      ...eventData,
+      createdAt: new Date().toISOString(),
+    };
+    
+    const docRef = await addDoc(collection(db, 'calendarEvents'), docData);
+    return { id: docRef.id, ...docData };
+  } catch (error) {
+    console.error("Error creating calendar event:", error);
+    throw error;
+  }
+};
+
+export const updateCalendarEvent = async (
+  eventId: string,
+  updates: Partial<CalendarEvent>
+) => {
+  try {
+    const eventRef = doc(db, 'calendarEvents', eventId);
+    await updateDoc(eventRef, updates);
+  } catch (error) {
+    console.error("Error updating calendar event:", error);
+    throw error;
+  }
+};
+
+export const deleteCalendarEvent = async (eventId: string) => {
+  try {
+    await deleteDoc(doc(db, 'calendarEvents', eventId));
+  } catch (error) {
+    console.error("Error deleting calendar event:", error);
+    throw error;
+  }
+};

@@ -1,6 +1,6 @@
 import React from 'react';
 import { Project, User, UserRole } from '../types';
-import ProjectCard from './ProjectCard';
+import ProjectCard from './EnhancedProjectCard';
 import { Sparkles, MessageSquare, FileText, CheckCircle, Clock, DollarSign, TrendingUp } from 'lucide-react';
 
 interface DashboardClientProps {

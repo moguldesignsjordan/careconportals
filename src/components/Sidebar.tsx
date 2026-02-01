@@ -69,7 +69,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       id: 'settings',
       label: 'Settings',
       icon: Settings,
-      roles: [UserRole.ADMIN],
+      roles: [UserRole.ADMIN, UserRole.CONTRACTOR, UserRole.CLIENT],
     },
   ];
 
@@ -125,8 +125,16 @@ const Sidebar: React.FC<SidebarProps> = ({
       {/* USER PILL */}
       <div className="px-4 py-4 border-b border-white/10">
         <div className="flex items-center gap-3">
-          <div className="h-9 w-9 rounded-full bg-care-orange flex items-center justify-center text-xs font-bold">
-            {currentUser.name?.charAt(0)?.toUpperCase() ?? '?'}
+          <div className="h-9 w-9 rounded-full bg-care-orange flex items-center justify-center text-xs font-bold overflow-hidden">
+            {currentUser.avatar ? (
+              <img 
+                src={currentUser.avatar} 
+                alt={currentUser.name || 'User'}
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              currentUser.name?.charAt(0)?.toUpperCase() ?? '?'
+            )}
           </div>
           <div className="flex flex-col">
             <span className="text-sm font-semibold truncate">

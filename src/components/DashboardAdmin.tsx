@@ -36,12 +36,12 @@ const DashboardAdmin: React.FC<DashboardAdminProps> = ({
   const clients = users.filter((u) => u.role === UserRole.CLIENT);
   const contractors = users.filter((u) => u.role === UserRole.CONTRACTOR);
 
-  // Use enum values instead of string literals for status comparisons
+  // Handle status as string from Firebase
   const activeProjects = projects.filter(
-    (p) => p.status !== ProjectStatus.COMPLETED && p.status !== ProjectStatus.ON_HOLD
+    (p) => String(p.status) !== String(ProjectStatus.COMPLETED) && String(p.status) !== String(ProjectStatus.ON_HOLD)
   );
   const completedProjects = projects.filter(
-    (p) => p.status === ProjectStatus.COMPLETED
+    (p) => String(p.status) === String(ProjectStatus.COMPLETED)
   );
 
   const totalBudget = projects.reduce(
@@ -56,16 +56,16 @@ const DashboardAdmin: React.FC<DashboardAdminProps> = ({
         )
       : 0;
 
-  const getStatusColor = (status: ProjectStatus) => {
-    switch (status) {
-      case ProjectStatus.PLANNING: return 'bg-blue-100 text-blue-700';
-      case ProjectStatus.DEMOLITION: return 'bg-red-100 text-red-700';
-      case ProjectStatus.ROUGH_IN: return 'bg-purple-100 text-purple-700';
-      case ProjectStatus.FINISHING: return 'bg-orange-100 text-orange-700';
-      case ProjectStatus.COMPLETED: return 'bg-green-100 text-green-700';
-      case ProjectStatus.ON_HOLD: return 'bg-gray-100 text-gray-700';
-      default: return 'bg-gray-100 text-gray-700';
-    }
+  // Handle status as string from Firebase - compare against enum values
+  const getStatusColor = (status: ProjectStatus | string): string => {
+    const statusStr = String(status);
+    if (statusStr === ProjectStatus.PLANNING || statusStr === 'Planning') return 'bg-blue-100 text-blue-700';
+    if (statusStr === ProjectStatus.DEMOLITION || statusStr === 'Demolition') return 'bg-red-100 text-red-700';
+    if (statusStr === ProjectStatus.ROUGH_IN || statusStr === 'Rough-in') return 'bg-purple-100 text-purple-700';
+    if (statusStr === ProjectStatus.FINISHING || statusStr === 'Finishing') return 'bg-orange-100 text-orange-700';
+    if (statusStr === ProjectStatus.COMPLETED || statusStr === 'Completed') return 'bg-green-100 text-green-700';
+    if (statusStr === ProjectStatus.ON_HOLD || statusStr === 'On Hold') return 'bg-gray-100 text-gray-700';
+    return 'bg-gray-100 text-gray-700';
   };
 
   return (

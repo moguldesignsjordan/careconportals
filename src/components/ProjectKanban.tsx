@@ -11,14 +11,16 @@ import { Project, ProjectStatus, User } from '../types';
 interface ProjectKanbanProps {
   projects: Project[];
   users: User[];
-  onSelectProject: (project: Project) => void;
+  currentUser: User;
+  onProjectClick: (project: Project) => void;
   onCreateProject?: () => void;
 }
 
 const ProjectKanban: React.FC<ProjectKanbanProps> = ({
   projects,
   users,
-  onSelectProject,
+  currentUser,
+  onProjectClick,
   onCreateProject,
 }) => {
   // Define kanban columns based on ProjectStatus
@@ -31,7 +33,8 @@ const ProjectKanban: React.FC<ProjectKanbanProps> = ({
   ];
 
   const getProjectsForStatus = (status: ProjectStatus) => {
-    return projects.filter((p) => p.status === status);
+    // Handle status as string from Firebase
+    return projects.filter((p) => String(p.status) === String(status));
   };
 
   const getClientName = (clientId: string) => {
@@ -95,7 +98,7 @@ const ProjectKanban: React.FC<ProjectKanbanProps> = ({
                   columnProjects.map((project) => (
                     <div
                       key={project.id}
-                      onClick={() => onSelectProject(project)}
+                      onClick={() => onProjectClick(project)}
                       className="bg-white rounded-xl p-4 shadow-sm border border-gray-100 cursor-pointer hover:shadow-md hover:border-care-orange/20 transition-all group"
                     >
                       <h4 className="font-bold text-sm text-gray-900 group-hover:text-care-orange transition-colors mb-2 truncate">

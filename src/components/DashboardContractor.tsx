@@ -40,12 +40,12 @@ const DashboardContractor: React.FC<DashboardContractorProps> = ({
     day: 'numeric',
   });
 
-  // Use enum values instead of string literals
+  // Handle status as string from Firebase
   const inProgressCount = myProjects.filter(
-    (p) => p.status === ProjectStatus.ROUGH_IN || p.status === ProjectStatus.DEMOLITION || p.status === ProjectStatus.FINISHING
+    (p) => String(p.status) === String(ProjectStatus.ROUGH_IN) || String(p.status) === String(ProjectStatus.DEMOLITION) || String(p.status) === String(ProjectStatus.FINISHING)
   ).length;
   const completedCount = myProjects.filter(
-    (p) => p.status === ProjectStatus.COMPLETED
+    (p) => String(p.status) === String(ProjectStatus.COMPLETED)
   ).length;
 
   const totalBudget = myProjects.reduce(

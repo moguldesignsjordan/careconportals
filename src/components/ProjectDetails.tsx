@@ -160,7 +160,7 @@ const ProjectDetails: React.FC<ProjectDetailsProps> = ({
                 key={status}
                 onClick={() => handleStatusChange(status)}
                 className={`px-3 py-1.5 rounded-full text-[11px] font-semibold border transition-all ${
-                  project.status === status
+                  String(project.status) === String(status)
                     ? 'bg-care-orange text-white border-care-orange'
                     : 'bg-white text-gray-600 border-gray-200 hover:border-care-orange/60'
                 }`}

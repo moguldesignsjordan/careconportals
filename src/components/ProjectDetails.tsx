@@ -4,12 +4,9 @@ import {
   Calendar,
   MapPin,
   CheckCircle,
+  Clock,
   MessageSquare,
   FileText,
-  Camera,
-  X,
-  Loader2,
-  Image as ImageIcon,
 } from 'lucide-react';
 import { Project, User, ProjectStatus } from '../types';
 
@@ -23,7 +20,7 @@ interface ProjectDetailsProps {
     status: ProjectStatus,
     progress: number
   ) => Promise<void>;
-  onAddUpdate: (projectId: string, content: string, imageFile?: File | null) => Promise<void>;
+  onAddUpdate: (projectId: string, content: string) => Promise<void>;
   onMessage: (user: User, projectId?: string) => void;
 }
 
@@ -38,48 +35,18 @@ const ProjectDetails: React.FC<ProjectDetailsProps> = ({
 }) => {
   const [updateText, setUpdateText] = useState('');
   const [updating, setUpdating] = useState(false);
-  const [updateImage, setUpdateImage] = useState<File | null>(null);
-  const [imagePreview, setImagePreview] = useState<string | null>(null);
 
   const client = users.find((u) => u.id === project.clientId) || null;
-  const contractor = users.find((u) => u.id === project.contractorId) || null;
-
-  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      // Validate file type
-      if (!file.type.startsWith('image/')) {
-        alert('Please select an image file');
-        return;
-      }
-      // Validate file size (max 10MB)
-      if (file.size > 10 * 1024 * 1024) {
-        alert('Image must be less than 10MB');
-        return;
-      }
-      setUpdateImage(file);
-      // Create preview URL
-      const previewUrl = URL.createObjectURL(file);
-      setImagePreview(previewUrl);
-    }
-  };
-
-  const clearImage = () => {
-    setUpdateImage(null);
-    if (imagePreview) {
-      URL.revokeObjectURL(imagePreview);
-      setImagePreview(null);
-    }
-  };
+  const contractor =
+    users.find((u) => u.id === project.contractorId) || null;
 
   const handleSubmitUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!updateText.trim() || updating) return;
+    if (!updateText.trim()) return;
     setUpdating(true);
     try {
-      await onAddUpdate(project.id, updateText.trim(), updateImage);
+      await onAddUpdate(project.id, updateText.trim());
       setUpdateText('');
-      clearImage();
     } finally {
       setUpdating(false);
     }
@@ -87,8 +54,9 @@ const ProjectDetails: React.FC<ProjectDetailsProps> = ({
 
   const handleStatusChange = async (status: ProjectStatus) => {
     let progress = project.progress || 0;
-    if (status === 'completed') progress = 100;
-    if (status === 'planned') progress = 0;
+    // Use enum values for comparison
+    if (status === ProjectStatus.COMPLETED) progress = 100;
+    if (status === ProjectStatus.PLANNING) progress = 0;
     await onUpdateStatus(project.id, status, progress);
   };
 
@@ -101,13 +69,29 @@ const ProjectDetails: React.FC<ProjectDetailsProps> = ({
     }
   };
 
-  const formatDateTime = (value?: string) => {
-    if (!value) return '';
-    try {
-      const date = new Date(value);
-      return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    } catch {
-      return value;
+  // Define available statuses for the quick-change buttons
+  const availableStatuses: ProjectStatus[] = [
+    ProjectStatus.PLANNING,
+    ProjectStatus.ROUGH_IN,
+    ProjectStatus.COMPLETED,
+  ];
+
+  const getStatusLabel = (status: ProjectStatus): string => {
+    switch (status) {
+      case ProjectStatus.PLANNING:
+        return 'Planning';
+      case ProjectStatus.DEMOLITION:
+        return 'Demolition';
+      case ProjectStatus.ROUGH_IN:
+        return 'In Progress';
+      case ProjectStatus.FINISHING:
+        return 'Finishing';
+      case ProjectStatus.COMPLETED:
+        return 'Completed';
+      case ProjectStatus.ON_HOLD:
+        return 'On Hold';
+      default:
+        return String(status);
     }
   };
 
@@ -129,10 +113,10 @@ const ProjectDetails: React.FC<ProjectDetailsProps> = ({
             <h1 className="text-xl md:text-2xl font-black text-[#111827]">
               {project.title}
             </h1>
-            {project.location && (
+            {(project as any).location && (
               <p className="text-xs text-gray-500 flex items-center gap-1 mt-1">
                 <MapPin size={12} className="text-care-orange" />
-                {project.location}
+                {(project as any).location}
               </p>
             )}
           </div>
@@ -171,23 +155,19 @@ const ProjectDetails: React.FC<ProjectDetailsProps> = ({
             Status
           </p>
           <div className="flex flex-wrap gap-2 mt-1">
-            {(['planned', 'in-progress', 'completed'] as ProjectStatus[]).map(
-              (status) => (
-                <button
-                  key={status}
-                  onClick={() => handleStatusChange(status)}
-                  className={`px-3 py-1.5 rounded-full text-[11px] font-semibold border transition-all ${
-                    project.status === status
-                      ? 'bg-care-orange text-white border-care-orange'
-                      : 'bg-white text-gray-600 border-gray-200 hover:border-care-orange/60'
-                  }`}
-                >
-                  {status === 'planned' && 'Planned'}
-                  {status === 'in-progress' && 'In Progress'}
-                  {status === 'completed' && 'Completed'}
-                </button>
-              )
-            )}
+            {availableStatuses.map((status) => (
+              <button
+                key={status}
+                onClick={() => handleStatusChange(status)}
+                className={`px-3 py-1.5 rounded-full text-[11px] font-semibold border transition-all ${
+                  project.status === status
+                    ? 'bg-care-orange text-white border-care-orange'
+                    : 'bg-white text-gray-600 border-gray-200 hover:border-care-orange/60'
+                }`}
+              >
+                {getStatusLabel(status)}
+              </button>
+            ))}
           </div>
         </div>
 
@@ -197,204 +177,135 @@ const ProjectDetails: React.FC<ProjectDetailsProps> = ({
           </p>
           <p className="text-2xl font-black text-[#111827]">
             {project.budget
-              ? project.budget.toLocaleString(undefined, {
-                  style: 'currency',
-                  currency: 'USD',
-                  maximumFractionDigits: 0,
-                })
-              : 'TBD'}
+              ? `$${project.budget.toLocaleString()}`
+              : 'Not set'}
           </p>
+          {project.spent !== undefined && project.budget ? (
+            <p className="text-xs text-gray-500 mt-1">
+              ${project.spent.toLocaleString()} spent ({Math.round((project.spent / project.budget) * 100)}%)
+            </p>
+          ) : null}
         </div>
       </section>
 
-      {/* Layout: left = team/updates, right = notes/docs */}
-      <section className="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
-        {/* Left: Team + updates */}
-        <div className="space-y-4 lg:col-span-2">
-          {/* Team */}
-          <div className="bg-white border border-gray-100 rounded-2xl p-4 space-y-3">
-            <h2 className="text-xs font-black text-[#111827] uppercase tracking-[0.18em]">
-              Project Team
-            </h2>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-              {client && (
-                <div className="flex items-center justify-between rounded-xl border border-gray-100 bg-gray-50 px-3 py-3">
-                  <div className="flex items-center gap-3">
-                    <div className="h-9 w-9 rounded-full bg-white flex items-center justify-center text-xs font-semibold text-gray-700">
-                      {client.name.charAt(0).toUpperCase()}
-                    </div>
-                    <div>
-                      <p className="font-semibold text-gray-900">
-                        {client.name}
-                      </p>
-                      <p className="text-[11px] text-gray-500">Client</p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => onMessage(client, project.id)}
-                    className="p-2 text-care-orange hover:bg-care-orange/10 rounded-lg transition-all"
-                  >
-                    <MessageSquare size={18} />
-                  </button>
-                </div>
-              )}
-
-              {contractor && (
-                <div className="flex items-center justify-between rounded-xl border border-gray-100 bg-gray-50 px-3 py-3">
-                  <div className="flex items-center gap-3">
-                    <div className="h-9 w-9 rounded-full bg-white flex items-center justify-center text-xs font-semibold text-gray-700">
-                      {contractor.name.charAt(0).toUpperCase()}
-                    </div>
-                    <div>
-                      <p className="font-semibold text-gray-900">
-                        {contractor.name}
-                      </p>
-                      <p className="text-[11px] text-gray-500">Contractor</p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => onMessage(contractor, project.id)}
-                    className="p-2 text-care-orange hover:bg-care-orange/10 rounded-lg transition-all"
-                  >
-                    <MessageSquare size={18} />
-                  </button>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Updates */}
-          <div className="bg-white border border-gray-100 rounded-2xl p-4 space-y-3">
-            <div className="flex items-center justify-between">
-              <h2 className="text-xs font-black text-[#111827] uppercase tracking-[0.18em]">
-                Site Updates
-              </h2>
-            </div>
-
-            <form onSubmit={handleSubmitUpdate} className="space-y-2">
-              <textarea
-                value={updateText}
-                onChange={(e) => setUpdateText(e.target.value)}
-                rows={3}
-                className="w-full text-xs rounded-xl border border-gray-200 bg-white py-2 px-3 focus:border-care-orange focus:ring-0"
-                placeholder="Log a progress update, material delivery, or inspection note..."
-              />
-              
-              {/* Image preview */}
-              {imagePreview && (
-                <div className="relative inline-block">
-                  <img 
-                    src={imagePreview} 
-                    alt="Preview" 
-                    className="h-20 w-20 object-cover rounded-xl border border-gray-200"
-                  />
-                  <button
-                    type="button"
-                    onClick={clearImage}
-                    className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 hover:bg-red-600 transition-colors"
-                  >
-                    <X size={12} />
-                  </button>
-                </div>
-              )}
-
-              <div className="flex items-center justify-between">
-                {/* Image upload button */}
-                <label className="inline-flex items-center gap-2 text-xs text-gray-500 cursor-pointer hover:text-care-orange transition-colors">
-                  <Camera size={16} className="text-care-orange" />
-                  <span className="font-semibold">
-                    {updateImage ? 'Change photo' : 'Add photo'}
-                  </span>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={handleImageSelect}
-                  />
-                </label>
-
-                <button
-                  type="submit"
-                  disabled={!updateText.trim() || updating}
-                  className="bg-[#1A1A1A] text-white px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 disabled:opacity-50"
-                >
-                  {updating ? (
-                    <Loader2 size={14} className="animate-spin" />
-                  ) : (
-                    <CheckCircle size={14} />
-                  )}
-                  {updating ? 'Posting...' : 'Post Update'}
-                </button>
-              </div>
-            </form>
-
-            {project.updates && project.updates.length > 0 ? (
-              <div className="space-y-3 mt-2 max-h-96 overflow-y-auto">
-                {project.updates
-                  .slice()
-                  .sort(
-                    (a, b) =>
-                      new Date(b.timestamp).getTime() -
-                      new Date(a.timestamp).getTime()
-                  )
-                  .map((u) => (
-                    <div
-                      key={u.id}
-                      className="rounded-xl bg-gray-50 px-3 py-2 text-xs space-y-2"
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="font-semibold text-gray-900">
-                          {u.author}
-                        </span>
-                        <span className="text-[10px] text-gray-400">
-                          {formatDateTime(u.timestamp)}
-                        </span>
-                      </div>
-                      <p className="text-gray-700 whitespace-pre-wrap">
-                        {u.content}
-                      </p>
-                      {/* Display image if present */}
-                      {u.imageUrl && (
-                        <div className="mt-2">
-                          <a 
-                            href={u.imageUrl} 
-                            target="_blank" 
-                            rel="noopener noreferrer"
-                            className="block"
-                          >
-                            <img 
-                              src={u.imageUrl} 
-                              alt="Update attachment"
-                              className="max-h-48 rounded-lg border border-gray-200 hover:opacity-90 transition-opacity cursor-pointer"
-                            />
-                          </a>
-                        </div>
-                      )}
-                    </div>
-                  ))}
-              </div>
-            ) : (
-              <p className="text-[11px] text-gray-400">
-                No updates yet. Use the box above to post your first site update.
-              </p>
-            )}
-          </div>
-        </div>
-
-        {/* Right: Notes / Docs hint */}
-        <div className="bg-white border border-gray-100 rounded-2xl p-4 space-y-3">
-          <h2 className="text-xs font-black text-[#111827] uppercase tracking-[0.18em]">
-            Project Files
-          </h2>
-          <p className="text-xs text-gray-500">
-            Upload contracts, permits, and photos in the Documents tab so your team and client can
-            reference them anytime.
+      {/* Description */}
+      {project.description && (
+        <section className="bg-white border border-gray-100 rounded-2xl p-4">
+          <p className="text-[11px] text-gray-400 uppercase tracking-[0.18em] mb-2">
+            Description
           </p>
-          <div className="mt-2 rounded-xl border border-dashed border-gray-200 px-4 py-6 text-center text-xs text-gray-400">
-            <FileText size={18} className="mx-auto mb-2 text-care-orange" />
-            Manage files from the global Documents section.
+          <p className="text-sm text-gray-700">{project.description}</p>
+        </section>
+      )}
+
+      {/* Team */}
+      <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {client && (
+          <div className="bg-white border border-gray-100 rounded-2xl p-4">
+            <p className="text-[11px] text-gray-400 uppercase tracking-[0.18em] mb-3">
+              Client
+            </p>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center text-sm font-bold">
+                  {client.name?.charAt(0) || 'C'}
+                </div>
+                <div>
+                  <p className="font-bold text-sm">{client.name}</p>
+                  <p className="text-xs text-gray-500">{client.email}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => onMessage(client, project.id)}
+                className="p-2 hover:bg-gray-50 rounded-lg transition-colors"
+              >
+                <MessageSquare size={18} className="text-care-orange" />
+              </button>
+            </div>
           </div>
+        )}
+
+        {contractor && (
+          <div className="bg-white border border-gray-100 rounded-2xl p-4">
+            <p className="text-[11px] text-gray-400 uppercase tracking-[0.18em] mb-3">
+              Contractor
+            </p>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center text-sm font-bold">
+                  {contractor.name?.charAt(0) || 'C'}
+                </div>
+                <div>
+                  <p className="font-bold text-sm">{contractor.name}</p>
+                  <p className="text-xs text-gray-500">{contractor.specialty || contractor.email}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => onMessage(contractor, project.id)}
+                className="p-2 hover:bg-gray-50 rounded-lg transition-colors"
+              >
+                <MessageSquare size={18} className="text-care-orange" />
+              </button>
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* Updates */}
+      <section className="bg-white border border-gray-100 rounded-2xl p-4">
+        <p className="text-[11px] text-gray-400 uppercase tracking-[0.18em] mb-4">
+          Project Updates
+        </p>
+
+        {/* Add update form */}
+        <form onSubmit={handleSubmitUpdate} className="mb-4">
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={updateText}
+              onChange={(e) => setUpdateText(e.target.value)}
+              placeholder="Add a project update..."
+              className="flex-1 px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-care-orange"
+            />
+            <button
+              type="submit"
+              disabled={updating || !updateText.trim()}
+              className="px-4 py-2 bg-care-orange text-white rounded-xl text-sm font-bold disabled:opacity-50 hover:bg-orange-600 transition-colors"
+            >
+              {updating ? 'Posting...' : 'Post'}
+            </button>
+          </div>
+        </form>
+
+        {/* Updates list */}
+        <div className="space-y-3">
+          {project.updates && project.updates.length > 0 ? (
+            project.updates.map((update) => (
+              <div
+                key={update.id}
+                className="p-3 bg-gray-50 rounded-xl"
+              >
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="font-bold text-xs">{update.author}</span>
+                  <span className="text-[10px] text-gray-400">
+                    {new Date(update.timestamp).toLocaleString()}
+                  </span>
+                </div>
+                <p className="text-sm text-gray-700">{update.content}</p>
+                {update.imageUrl && (
+                  <img
+                    src={update.imageUrl}
+                    alt="Update"
+                    className="mt-2 rounded-lg max-h-48 object-cover"
+                  />
+                )}
+              </div>
+            ))
+          ) : (
+            <p className="text-xs text-gray-500 text-center py-4">
+              No updates yet. Be the first to post an update!
+            </p>
+          )}
         </div>
       </section>
     </div>

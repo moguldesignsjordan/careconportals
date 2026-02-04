@@ -426,12 +426,17 @@ export const addMilestone = async (
 ) => {
   try {
     const projectRef = doc(db, 'projects', projectId);
-    
+
+    // Strip undefined values before sending to Firestore (arrayUnion cannot contain undefined)
+    const sanitizedMilestone = Object.fromEntries(
+      Object.entries(milestone as any).filter(([, value]) => value !== undefined)
+    ) as Omit<Milestone, 'id' | 'comments'>;
+
     const newMilestone: Milestone = {
-      ...milestone,
+      ...sanitizedMilestone,
       id: Math.random().toString(36).substr(2, 9),
       comments: [],
-      imageUrls: milestone.imageUrls || []
+      imageUrls: sanitizedMilestone.imageUrls || []
     };
     
     await updateDoc(projectRef, {
@@ -460,16 +465,47 @@ export const updateMilestone = async (
     
     const projectData = projectDoc.data();
     const milestones = (projectData.milestones || []) as Milestone[];
+
+    // Clean updates so we never write undefined into Firestore
+    const cleanUpdates = Object.fromEntries(
+      Object.entries(updates as any).filter(([, value]) => value !== undefined)
+    ) as Partial<Milestone>;
     
     const updatedMilestones = milestones.map((milestone) =>
       milestone.id === milestoneId
-        ? { ...milestone, ...updates }
+        ? { ...milestone, ...cleanUpdates }
         : milestone
     );
     
     await updateDoc(projectRef, { milestones: updatedMilestones });
   } catch (error) {
     console.error("Error updating milestone:", error);
+    throw error;
+  }
+};
+
+export const deleteMilestone = async (
+  projectId: string,
+  milestoneId: string
+) => {
+  try {
+    const projectRef = doc(db, 'projects', projectId);
+    const projectDoc = await getDoc(projectRef);
+    
+    if (!projectDoc.exists()) {
+      throw new Error('Project not found');
+    }
+    
+    const projectData = projectDoc.data();
+    const milestones = (projectData.milestones || []) as Milestone[];
+    
+    const updatedMilestones = milestones.filter(
+      (milestone) => milestone.id !== milestoneId
+    );
+    
+    await updateDoc(projectRef, { milestones: updatedMilestones });
+  } catch (error) {
+    console.error("Error deleting milestone:", error);
     throw error;
   }
 };
@@ -509,14 +545,19 @@ export const addMilestoneComment = async (
     const projectData = projectDoc.data();
     const milestones = (projectData.milestones || []) as Milestone[];
     
-    const newComment: MilestoneComment = {
+    // Build comment without undefined fields
+    const newComment: any = {
       id: Math.random().toString(36).substr(2, 9),
       author: authorName,
       authorId,
       content,
       timestamp: new Date().toISOString(),
-      imageUrl
     };
+    
+    // Only add imageUrl if it has a value
+    if (imageUrl) {
+      newComment.imageUrl = imageUrl;
+    }
     
     const updatedMilestones = milestones.map(milestone =>
       milestone.id === milestoneId

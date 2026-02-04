@@ -1,3 +1,4 @@
+// src/components/ProjectTimeline.tsx
 import React, { useState } from 'react';
 import {
   CheckCircle2,
@@ -11,49 +12,26 @@ import {
   Image as ImageIcon,
   Calendar,
   User,
-  AlertCircle,
-  Loader2,
   X,
   MapPin,
   Hammer,
   HardHat,
   Paintbrush,
   PartyPopper,
-  PauseCircle,
+  Trash2,
+  Edit3,
 } from 'lucide-react';
-import { Project, User as UserType, ProjectStatus } from '../types';
+import { Project, User as UserType, Milestone } from '../types';
 
-// Phase definitions for construction projects
 const PROJECT_PHASES = [
-  { id: 'planning', label: 'Planning', icon: Calendar, color: 'blue' },
-  { id: 'demolition', label: 'Demolition', icon: Hammer, color: 'red' },
-  { id: 'rough-in', label: 'Rough-In', icon: HardHat, color: 'purple' },
+  { id: 'planning', label: 'Planning', icon: Calendar, color: 'orange' },
+  { id: 'demolition', label: 'Demolition', icon: Hammer, color: 'orange' },
+  { id: 'rough-in', label: 'Rough-In', icon: HardHat, color: 'orange' },
   { id: 'finishing', label: 'Finishing', icon: Paintbrush, color: 'orange' },
-  { id: 'completed', label: 'Completed', icon: PartyPopper, color: 'green' },
+  { id: 'completed', label: 'Complete', icon: PartyPopper, color: 'green' },
 ] as const;
 
-type PhaseId = typeof PROJECT_PHASES[number]['id'];
-
-export interface Milestone {
-  id: string;
-  phaseId: PhaseId;
-  title: string;
-  description?: string;
-  date: string;
-  completedAt?: string;
-  imageUrls?: string[];
-  comments?: MilestoneComment[];
-  status: 'pending' | 'in-progress' | 'completed';
-}
-
-export interface MilestoneComment {
-  id: string;
-  author: string;
-  authorId: string;
-  content: string;
-  timestamp: string;
-  imageUrl?: string;
-}
+type PhaseId = (typeof PROJECT_PHASES)[number]['id'];
 
 interface ProjectTimelineProps {
   project: Project;
@@ -61,7 +39,12 @@ interface ProjectTimelineProps {
   milestones: Milestone[];
   onAddMilestone: (milestone: Omit<Milestone, 'id' | 'comments'>) => Promise<void>;
   onUpdateMilestone: (milestoneId: string, updates: Partial<Milestone>) => Promise<void>;
-  onAddComment: (milestoneId: string, content: string, imageFile?: File | null) => Promise<void>;
+  onDeleteMilestone: (milestoneId: string) => Promise<void>;
+  onAddComment: (
+    milestoneId: string,
+    content: string,
+    imageFile?: File | null
+  ) => Promise<void>;
   onUploadMilestoneImage: (milestoneId: string, file: File) => Promise<string>;
 }
 
@@ -71,559 +54,838 @@ const ProjectTimeline: React.FC<ProjectTimelineProps> = ({
   milestones,
   onAddMilestone,
   onUpdateMilestone,
+  onDeleteMilestone,
   onAddComment,
-  onUploadMilestoneImage,
 }) => {
-  const [expandedPhases, setExpandedPhases] = useState<Set<string>>(new Set(['planning', 'demolition', 'rough-in', 'finishing']));
-  const [showAddMilestone, setShowAddMilestone] = useState<PhaseId | null>(null);
-  const [newMilestone, setNewMilestone] = useState({ title: '', description: '', date: '' });
+  // Phase management
+  const [customPhases, setCustomPhases] = useState<typeof PROJECT_PHASES[number][]>([...PROJECT_PHASES]);
+  const [expandedPhases, setExpandedPhases] = useState<Set<string>>(
+    () => new Set(customPhases.map((p) => p.id))
+  );
+
+  // Phase labels (editable)
+  const [phaseLabels, setPhaseLabels] = useState<Record<string, string>>(() => 
+    Object.fromEntries(PROJECT_PHASES.map(p => [p.id, p.label]))
+  );
+  const [editingPhaseId, setEditingPhaseId] = useState<string | null>(null);
+  const [phaseLabelDraft, setPhaseLabelDraft] = useState('');
+
+  // Milestone creation
+  const [showAddMilestone, setShowAddMilestone] = useState<string | null>(null);
+  const [newMilestone, setNewMilestone] = useState({
+    title: '',
+    description: '',
+    date: '',
+  });
   const [addingMilestone, setAddingMilestone] = useState(false);
+
+  // Milestone expansion
   const [expandedMilestone, setExpandedMilestone] = useState<string | null>(null);
+  
+  // Milestone editing
+  const [editingMilestoneTitle, setEditingMilestoneTitle] = useState<string | null>(null);
+  const [editingMilestoneDesc, setEditingMilestoneDesc] = useState<string | null>(null);
+  const [titleDraft, setTitleDraft] = useState('');
+  const [descDraft, setDescDraft] = useState('');
+
+  // Comments
   const [commentText, setCommentText] = useState('');
   const [commentImage, setCommentImage] = useState<File | null>(null);
   const [commentImagePreview, setCommentImagePreview] = useState<string | null>(null);
-  const [addingComment, setAddingComment] = useState(false);
+  const [addingCommentFor, setAddingCommentFor] = useState<string | null>(null);
+
+  // Image viewer
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
 
-  // Determine current phase based on project status
-  const getCurrentPhase = (): PhaseId => {
-    switch (project.status) {
-      case 'planned': return 'planning';
-      case 'in-progress': 
-        if (project.progress < 25) return 'demolition';
-        if (project.progress < 50) return 'rough-in';
-        if (project.progress < 90) return 'finishing';
-        return 'finishing';
-      case 'completed': return 'completed';
-      default: return 'planning';
-    }
-  };
+  // ---- Helpers ----
 
-  const currentPhase = getCurrentPhase();
-  const currentPhaseIndex = PROJECT_PHASES.findIndex(p => p.id === currentPhase);
+  const getPhaseMilestones = (phaseId: string) =>
+    (milestones || [])
+      .filter((m) => m.phaseId === phaseId)
+      .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+
+  const getPhaseStats = (phaseId: string) => {
+    const ms = getPhaseMilestones(phaseId);
+    const completed = ms.filter((m) => m.status === 'completed').length;
+    return { total: ms.length, completed };
+  };
 
   const togglePhase = (phaseId: string) => {
-    const newExpanded = new Set(expandedPhases);
-    if (newExpanded.has(phaseId)) {
-      newExpanded.delete(phaseId);
-    } else {
-      newExpanded.add(phaseId);
+    setExpandedPhases((prev) => {
+      const next = new Set(prev);
+      if (next.has(phaseId)) next.delete(phaseId);
+      else next.add(phaseId);
+      return next;
+    });
+  };
+
+  // Phase label editing
+  const startEditingPhaseLabel = (phaseId: string) => {
+    const current = phaseLabels[phaseId] || '';
+    setEditingPhaseId(phaseId);
+    setPhaseLabelDraft(current);
+  };
+
+  const commitPhaseLabel = () => {
+    if (!editingPhaseId) return;
+    const trimmed = phaseLabelDraft.trim();
+    if (trimmed) {
+      setPhaseLabels((prev) => ({
+        ...prev,
+        [editingPhaseId]: trimmed,
+      }));
     }
-    setExpandedPhases(newExpanded);
+    setEditingPhaseId(null);
+    setPhaseLabelDraft('');
   };
 
-  const getPhaseStatus = (phaseIndex: number): 'completed' | 'current' | 'upcoming' => {
-    if (phaseIndex < currentPhaseIndex) return 'completed';
-    if (phaseIndex === currentPhaseIndex) return 'current';
-    return 'upcoming';
-  };
-
-  const getPhaseMilestones = (phaseId: PhaseId) => {
-    return milestones.filter(m => m.phaseId === phaseId).sort((a, b) => 
-      new Date(a.date).getTime() - new Date(b.date).getTime()
-    );
-  };
-
-  const getPhaseColorClasses = (color: string, status: 'completed' | 'current' | 'upcoming') => {
-    if (status === 'upcoming') {
-      return {
-        bg: 'bg-gray-100',
-        text: 'text-gray-400',
-        border: 'border-gray-200',
-        line: 'bg-gray-200',
-      };
+  const handlePhaseLabelKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      e.currentTarget.blur();
+    } else if (e.key === 'Escape') {
+      setEditingPhaseId(null);
+      setPhaseLabelDraft('');
     }
+  };
+
+  // Delete phase
+  const handleDeletePhase = (phaseId: string) => {
+    const phaseMilestones = getPhaseMilestones(phaseId);
+    if (phaseMilestones.length > 0) {
+      alert('Cannot delete a phase with milestones. Please delete all milestones first.');
+      return;
+    }
+    if (confirm('Delete this phase? This cannot be undone.')) {
+      setCustomPhases(prev => prev.filter(p => p.id !== phaseId));
+      setExpandedPhases(prev => {
+        const next = new Set(prev);
+        next.delete(phaseId);
+        return next;
+      });
+    }
+  };
+
+  // Add custom phase
+  const handleAddPhase = () => {
+    const phaseName = prompt('Enter phase name:');
+    if (!phaseName || !phaseName.trim()) return;
     
-    const colors: Record<string, { bg: string; text: string; border: string; line: string }> = {
-      blue: { bg: 'bg-blue-50', text: 'text-blue-600', border: 'border-blue-200', line: 'bg-blue-400' },
-      red: { bg: 'bg-red-50', text: 'text-red-600', border: 'border-red-200', line: 'bg-red-400' },
-      purple: { bg: 'bg-purple-50', text: 'text-purple-600', border: 'border-purple-200', line: 'bg-purple-400' },
-      orange: { bg: 'bg-care-orange/10', text: 'text-care-orange', border: 'border-care-orange/30', line: 'bg-care-orange' },
-      green: { bg: 'bg-green-50', text: 'text-green-600', border: 'border-green-200', line: 'bg-green-400' },
+    const newPhaseId = `custom-${Date.now()}`;
+    const newPhase = {
+      id: newPhaseId,
+      label: phaseName.trim(),
+      icon: Calendar,
+      color: 'orange' as const,
     };
-    return colors[color] || colors.blue;
+    
+    setCustomPhases(prev => [...prev, newPhase]);
+    setPhaseLabels(prev => ({ ...prev, [newPhaseId]: phaseName.trim() }));
+    setExpandedPhases(prev => new Set([...prev, newPhaseId]));
   };
 
-  const handleAddMilestone = async (phaseId: PhaseId) => {
-    if (!newMilestone.title.trim() || !newMilestone.date) return;
-    
+  // Milestone creation
+  const handleStartAddMilestone = (phaseId: string) => {
+    setShowAddMilestone(phaseId);
+    setNewMilestone({ title: '', description: '', date: '' });
+  };
+
+  const handleCreateMilestone = async (phaseId: string) => {
+    if (!newMilestone.title.trim()) return;
     setAddingMilestone(true);
     try {
-      await onAddMilestone({
+      const payload: any = {
         phaseId,
         title: newMilestone.title.trim(),
-        description: newMilestone.description.trim(),
-        date: newMilestone.date,
+        date: newMilestone.date || new Date().toISOString().slice(0, 10),
         status: 'pending',
-      });
-      setNewMilestone({ title: '', description: '', date: '' });
+        imageUrls: [],
+      };
+
+      const desc = newMilestone.description.trim();
+      if (desc) {
+        payload.description = desc;
+      }
+
+      await onAddMilestone(payload);
+
       setShowAddMilestone(null);
+      setNewMilestone({ title: '', description: '', date: '' });
+    } catch (err) {
+      console.error('Error creating milestone', err);
     } finally {
       setAddingMilestone(false);
     }
   };
 
-  const handleCommentImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      if (!file.type.startsWith('image/')) {
-        alert('Please select an image file');
-        return;
+  // Milestone status
+  const handleStatusChange = async (
+    milestone: Milestone,
+    status: Milestone['status']
+  ) => {
+    try {
+      const updates: any = { status };
+      if (status === 'completed') {
+        updates.completedAt = new Date().toISOString();
       }
-      if (file.size > 10 * 1024 * 1024) {
-        alert('Image must be less than 10MB');
-        return;
-      }
-      setCommentImage(file);
-      setCommentImagePreview(URL.createObjectURL(file));
+      await onUpdateMilestone(milestone.id, updates);
+    } catch (err) {
+      console.error('Error updating milestone status', err);
     }
   };
 
-  const clearCommentImage = () => {
-    setCommentImage(null);
-    if (commentImagePreview) {
-      URL.revokeObjectURL(commentImagePreview);
-      setCommentImagePreview(null);
+  // Milestone title editing (inline)
+  const startEditingTitle = (milestone: Milestone) => {
+    setEditingMilestoneTitle(milestone.id);
+    setTitleDraft(milestone.title || '');
+  };
+
+  const commitTitle = async (milestoneId: string) => {
+    const trimmed = titleDraft.trim();
+    if (trimmed && trimmed !== milestones.find(m => m.id === milestoneId)?.title) {
+      try {
+        await onUpdateMilestone(milestoneId, { title: trimmed });
+      } catch (err) {
+        console.error('Error updating title', err);
+      }
     }
+    setEditingMilestoneTitle(null);
+    setTitleDraft('');
+  };
+
+  const handleTitleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>, milestoneId: string) => {
+    if (e.key === 'Enter') {
+      e.currentTarget.blur();
+    } else if (e.key === 'Escape') {
+      setEditingMilestoneTitle(null);
+      setTitleDraft('');
+    }
+  };
+
+  // Milestone description editing (inline)
+  const startEditingDesc = (milestone: Milestone) => {
+    setEditingMilestoneDesc(milestone.id);
+    setDescDraft(milestone.description || '');
+  };
+
+  const commitDesc = async (milestoneId: string) => {
+    const trimmed = descDraft.trim();
+    const current = milestones.find(m => m.id === milestoneId)?.description;
+    if (trimmed !== current) {
+      try {
+        await onUpdateMilestone(milestoneId, { description: trimmed || undefined });
+      } catch (err) {
+        console.error('Error updating description', err);
+      }
+    }
+    setEditingMilestoneDesc(null);
+    setDescDraft('');
+  };
+
+  const handleDescKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>, milestoneId: string) => {
+    if (e.key === 'Escape') {
+      setEditingMilestoneDesc(null);
+      setDescDraft('');
+    }
+  };
+
+  // Delete milestone
+  const handleDeleteMilestone = async (milestoneId: string) => {
+    if (confirm('Delete this milestone? This cannot be undone.')) {
+      try {
+        await onDeleteMilestone(milestoneId);
+      } catch (err) {
+        console.error('Error deleting milestone', err);
+      }
+    }
+  };
+
+  const formatDate = (value?: string) => {
+    if (!value) return 'No date';
+    try {
+      return new Date(value).toLocaleDateString();
+    } catch {
+      return value;
+    }
+  };
+
+  const handleCommentImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setCommentImage(file);
+    const url = URL.createObjectURL(file);
+    setCommentImagePreview(url);
   };
 
   const handleAddComment = async (milestoneId: string) => {
     if (!commentText.trim() && !commentImage) return;
-    
-    setAddingComment(true);
+    setAddingCommentFor(milestoneId);
     try {
-      await onAddComment(milestoneId, commentText.trim(), commentImage);
+      await onAddComment(milestoneId, commentText.trim(), commentImage || undefined);
       setCommentText('');
-      clearCommentImage();
+      setCommentImage(null);
+      if (commentImagePreview) {
+        URL.revokeObjectURL(commentImagePreview);
+        setCommentImagePreview(null);
+      }
+    } catch (err) {
+      console.error('Error adding comment', err);
     } finally {
-      setAddingComment(false);
+      setAddingCommentFor(null);
     }
   };
 
-  const formatDate = (dateStr: string) => {
-    try {
-      return new Date(dateStr).toLocaleDateString('en-US', {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric',
-      });
-    } catch {
-      return dateStr;
+  const renderStatusBadge = (status: Milestone['status']) => {
+    let label = 'Pending';
+    let classes = 'bg-gray-100 text-gray-700 border border-gray-200';
+
+    if (status === 'in-progress') {
+      label = 'In Progress';
+      classes = 'bg-orange-50 text-orange-700 border border-orange-200';
+    } else if (status === 'completed') {
+      label = 'Completed';
+      classes = 'bg-green-100 text-green-700 border border-green-200';
     }
+
+    return (
+      <span
+        className={`text-xs font-bold uppercase tracking-wide px-2.5 py-1 rounded-full ${classes}`}
+      >
+        {label}
+      </span>
+    );
   };
 
-  const formatDateTime = (dateStr: string) => {
-    try {
-      return new Date(dateStr).toLocaleString('en-US', {
-        month: 'short',
-        day: 'numeric',
-        hour: 'numeric',
-        minute: '2-digit',
-      });
-    } catch {
-      return dateStr;
+  const getStatusIcon = (status: Milestone['status']) => {
+    if (status === 'completed') {
+      return <CheckCircle2 className="text-green-500" size={28} />;
     }
+    if (status === 'in-progress') {
+      return <Clock className="text-care-orange" size={28} />;
+    }
+    return <Circle className="text-gray-300" size={28} />;
   };
+
+  const getPhaseColorClasses = (color: string, hasActive: boolean) => {
+    const base = 'bg-white border-gray-200 text-gray-900';
+    const active =
+      color === 'orange'
+        ? 'bg-orange-50 border-orange-300 text-orange-900'
+        : 'bg-green-50 border-green-300 text-green-900';
+
+    return hasActive ? active : base;
+  };
+
+  // ---- Render ----
 
   return (
-    <div className="space-y-2">
-      {/* Timeline Header */}
-      <div className="bg-gradient-to-r from-[#1A1A1A] to-[#2D2D2D] rounded-2xl p-6 text-white">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <p className="text-[10px] font-black text-white/50 uppercase tracking-[0.2em] mb-1">
+    <div className="space-y-5 pb-8">
+      {/* Header */}
+      <div className="bg-gradient-to-r from-care-orange to-orange-600 rounded-2xl p-5 text-white shadow-lg">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="space-y-2">
+            <p className="text-xs font-black text-white/60 uppercase tracking-widest">
               Project Timeline
             </p>
-            <h2 className="text-xl font-black">{project.title}</h2>
-            {project.location && (
-              <p className="text-xs text-white/60 flex items-center gap-1 mt-1">
-                <MapPin size={12} />
-                {project.location}
+            <h2 className="text-2xl font-black leading-tight">
+              {project.title || 'Untitled Project'}
+            </h2>
+            {project.address && (
+              <p className="mt-1.5 flex items-center gap-1.5 text-sm text-white/80">
+                <MapPin size={14} />
+                <span className="line-clamp-1">{project.address}</span>
               </p>
             )}
           </div>
-          <div className="text-right">
-            <p className="text-3xl font-black text-care-orange">{project.progress}%</p>
-            <p className="text-[10px] font-bold text-white/50 uppercase tracking-widest">Complete</p>
-          </div>
-        </div>
-        
-        {/* Mini progress phases */}
-        <div className="flex items-center gap-1 mt-4">
-          {PROJECT_PHASES.map((phase, index) => {
-            const status = getPhaseStatus(index);
-            return (
-              <React.Fragment key={phase.id}>
-                <div 
-                  className={`h-2 flex-1 rounded-full transition-all ${
-                    status === 'completed' ? 'bg-care-orange' :
-                    status === 'current' ? 'bg-care-orange/50' :
-                    'bg-white/20'
-                  }`}
-                />
-              </React.Fragment>
-            );
-          })}
-        </div>
-        <div className="flex justify-between mt-2">
-          {PROJECT_PHASES.map((phase, index) => {
-            const status = getPhaseStatus(index);
-            return (
-              <span 
-                key={phase.id}
-                className={`text-[9px] font-bold uppercase tracking-wider ${
-                  status === 'completed' ? 'text-care-orange' :
-                  status === 'current' ? 'text-white' :
-                  'text-white/40'
-                }`}
-              >
-                {phase.label}
+          <div className="space-y-2 sm:text-right">
+            <div className="flex items-center gap-1.5 text-sm text-white/80 sm:justify-end">
+              <User size={14} />
+              <span>{currentUser.name}</span>
+            </div>
+            <div className="flex flex-wrap gap-2 sm:justify-end">
+              <span className="px-3 py-1 rounded-full bg-white/20 text-xs font-semibold">
+                {milestones.length} milestone{milestones.length === 1 ? '' : 's'}
               </span>
-            );
-          })}
+              <span className="px-3 py-1 rounded-full bg-white/20 text-xs font-semibold">
+                {milestones.filter((m) => m.status === 'completed').length} completed
+              </span>
+            </div>
+          </div>
         </div>
       </div>
 
-      {/* Timeline Phases */}
-      <div className="space-y-3">
-        {PROJECT_PHASES.map((phase, phaseIndex) => {
+      {/* Add Phase Button */}
+      <button
+        type="button"
+        onClick={handleAddPhase}
+        className="w-full flex items-center justify-center gap-2 py-3 rounded-xl border-2 border-dashed border-gray-300 bg-gray-50 hover:bg-gray-100 hover:border-orange-400 transition-colors text-sm font-semibold text-gray-600"
+      >
+        <Plus size={18} />
+        Add Custom Phase
+      </button>
+
+      {/* Phases list */}
+      <div className="space-y-4">
+        {customPhases.map((phase) => {
           const Icon = phase.icon;
-          const status = getPhaseStatus(phaseIndex);
-          const colorClasses = getPhaseColorClasses(phase.color, status);
           const phaseMilestones = getPhaseMilestones(phase.id);
+          const { total, completed } = getPhaseStats(phase.id);
           const isExpanded = expandedPhases.has(phase.id);
+          const hasActive = total > 0;
+          const colorClasses = getPhaseColorClasses(phase.color, hasActive);
 
           return (
-            <div key={phase.id} className="relative">
-              {/* Connecting line */}
-              {phaseIndex < PROJECT_PHASES.length - 1 && (
-                <div 
-                  className={`absolute left-6 top-14 w-0.5 h-[calc(100%-3rem)] ${
-                    status === 'upcoming' ? 'bg-gray-200' : colorClasses.line
-                  } transition-colors`}
-                  style={{ opacity: isExpanded ? 1 : 0 }}
-                />
-              )}
-
-              {/* Phase Header */}
-              <button
+            <div
+              key={phase.id}
+              className="relative rounded-2xl bg-white border-2 border-gray-100 shadow-md overflow-hidden"
+            >
+              {/* Phase header */}
+              <div
+                role="button"
+                tabIndex={0}
+                className={`flex items-center gap-4 p-5 cursor-pointer transition-colors ${colorClasses}`}
                 onClick={() => togglePhase(phase.id)}
-                className={`w-full flex items-center gap-4 p-4 rounded-2xl border-2 transition-all ${colorClasses.bg} ${colorClasses.border} hover:shadow-md`}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    togglePhase(phase.id);
+                  }
+                }}
               >
-                <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${
-                  status === 'completed' ? 'bg-green-500 text-white' :
-                  status === 'current' ? `${colorClasses.text} bg-white shadow-lg` :
-                  'bg-gray-200 text-gray-400'
-                }`}>
-                  {status === 'completed' ? (
-                    <CheckCircle2 size={24} />
-                  ) : (
-                    <Icon size={24} />
-                  )}
+                <div className="flex items-center justify-center w-14 h-14 rounded-xl bg-white shadow-md shrink-0">
+                  <Icon className="text-gray-800" size={26} />
                 </div>
 
-                <div className="flex-1 text-left">
-                  <div className="flex items-center gap-2">
-                    <h3 className={`text-sm font-black uppercase tracking-wider ${
-                      status === 'upcoming' ? 'text-gray-400' : 'text-gray-900'
-                    }`}>
-                      {phase.label}
-                    </h3>
-                    {status === 'current' && (
-                      <span className="px-2 py-0.5 bg-care-orange text-white text-[9px] font-black uppercase tracking-wider rounded-full animate-pulse">
-                        Current
-                      </span>
-                    )}
+                <div className="flex-1 min-w-0 space-y-2">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 space-y-1.5">
+                      {/* Inline-editable phase label */}
+                      {editingPhaseId === phase.id ? (
+                        <input
+                          autoFocus
+                          value={phaseLabelDraft}
+                          onChange={(e) => setPhaseLabelDraft(e.target.value)}
+                          onBlur={commitPhaseLabel}
+                          onKeyDown={handlePhaseLabelKeyDown}
+                          onClick={(e) => e.stopPropagation()}
+                          className="bg-white text-base font-black uppercase tracking-wider text-gray-900 px-2 py-1 rounded-lg border-2 border-orange-400 focus:outline-none focus:ring-2 focus:ring-orange-500 w-full"
+                        />
+                      ) : (
+                        <div
+                          className="text-base font-black uppercase tracking-wider text-gray-900 inline-flex items-center gap-2 rounded-lg px-2 py-1 -mx-2 hover:bg-white/60 cursor-text"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            startEditingPhaseLabel(phase.id);
+                          }}
+                        >
+                          {phaseLabels[phase.id] || phase.label}
+                          <Edit3 size={14} className="text-gray-400" />
+                        </div>
+                      )}
+
+                      <p className="text-sm text-gray-600 font-medium">
+                        {total === 0
+                          ? 'No milestones yet'
+                          : `${completed}/${total} completed`}
+                      </p>
+                    </div>
+
+                    <div className="flex flex-col items-end gap-2 shrink-0">
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeletePhase(phase.id);
+                          }}
+                          className="p-2 rounded-lg bg-red-100 text-red-600 hover:bg-red-200 transition-colors"
+                          title="Delete phase"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleStartAddMilestone(phase.id);
+                          }}
+                          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-black text-white text-sm font-bold hover:bg-gray-800 shadow-md"
+                        >
+                          <Plus size={16} />
+                          Add
+                        </button>
+                        <div className="w-9 h-9 rounded-full bg-white/80 shadow-sm flex items-center justify-center">
+                          {isExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                  <p className="text-xs text-gray-500 mt-0.5">
-                    {phaseMilestones.length} milestone{phaseMilestones.length !== 1 ? 's' : ''} 
-                    {phaseMilestones.filter(m => m.status === 'completed').length > 0 && (
-                      <span className="text-green-600 ml-1">
-                        • {phaseMilestones.filter(m => m.status === 'completed').length} completed
-                      </span>
-                    )}
-                  </p>
                 </div>
+              </div>
 
-                <div className="flex items-center gap-2">
-                  {status !== 'upcoming' && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setShowAddMilestone(showAddMilestone === phase.id ? null : phase.id);
-                      }}
-                      className={`p-2 rounded-lg ${colorClasses.text} hover:bg-white/80 transition-colors`}
-                    >
-                      <Plus size={18} />
-                    </button>
-                  )}
-                  {isExpanded ? <ChevronUp size={20} className="text-gray-400" /> : <ChevronDown size={20} className="text-gray-400" />}
-                </div>
-              </button>
-
-              {/* Add Milestone Form */}
+              {/* Add milestone form */}
               {showAddMilestone === phase.id && (
-                <div className="ml-16 mt-3 p-4 bg-white rounded-xl border-2 border-dashed border-gray-200 space-y-3">
-                  <p className="text-xs font-black text-gray-400 uppercase tracking-widest">Add Milestone</p>
-                  <input
-                    type="text"
-                    placeholder="Milestone title..."
-                    value={newMilestone.title}
-                    onChange={(e) => setNewMilestone({ ...newMilestone, title: e.target.value })}
-                    className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:border-care-orange focus:ring-0"
-                  />
-                  <textarea
-                    placeholder="Description (optional)..."
-                    value={newMilestone.description}
-                    onChange={(e) => setNewMilestone({ ...newMilestone, description: e.target.value })}
-                    rows={2}
-                    className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:border-care-orange focus:ring-0"
-                  />
-                  <input
-                    type="date"
-                    value={newMilestone.date}
-                    onChange={(e) => setNewMilestone({ ...newMilestone, date: e.target.value })}
-                    className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:border-care-orange focus:ring-0"
-                  />
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => setShowAddMilestone(null)}
-                      className="flex-1 py-2 text-xs font-bold text-gray-500 hover:bg-gray-100 rounded-lg transition-colors"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={() => handleAddMilestone(phase.id)}
-                      disabled={!newMilestone.title.trim() || !newMilestone.date || addingMilestone}
-                      className="flex-1 py-2 text-xs font-bold text-white bg-care-orange rounded-lg hover:bg-care-orange/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
-                    >
-                      {addingMilestone ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
-                      Add
-                    </button>
+                <div className="border-t-2 border-gray-100 px-5 pb-5 pt-3 bg-gray-50">
+                  <div className="space-y-4 bg-white rounded-xl p-4 border border-gray-200">
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-bold text-gray-700 uppercase tracking-wide">
+                        Title
+                      </label>
+                      <input
+                        type="text"
+                        value={newMilestone.title}
+                        onChange={(e) =>
+                          setNewMilestone((prev) => ({
+                            ...prev,
+                            title: e.target.value,
+                          }))
+                        }
+                        className="w-full text-base rounded-lg border-2 border-gray-300 px-3 py-2.5 focus:outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-200"
+                        placeholder="e.g. Inspection, Walkthrough, Payment"
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-bold text-gray-700 uppercase tracking-wide">
+                        Date
+                      </label>
+                      <input
+                        type="date"
+                        value={newMilestone.date}
+                        onChange={(e) =>
+                          setNewMilestone((prev) => ({
+                            ...prev,
+                            date: e.target.value,
+                          }))
+                        }
+                        className="w-full text-base rounded-lg border-2 border-gray-300 px-3 py-2.5 focus:outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-200"
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="block text-xs font-bold text-gray-700 uppercase tracking-wide">
+                        Notes
+                      </label>
+                      <textarea
+                        value={newMilestone.description}
+                        onChange={(e) =>
+                          setNewMilestone((prev) => ({
+                            ...prev,
+                            description: e.target.value,
+                          }))
+                        }
+                        className="w-full text-sm rounded-lg border-2 border-gray-300 px-3 py-2.5 focus:outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-200 resize-none"
+                        rows={3}
+                        placeholder="Add details, instructions, or notes..."
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between gap-3 pt-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowAddMilestone(null);
+                          setNewMilestone({ title: '', description: '', date: '' });
+                        }}
+                        className="text-sm font-medium text-gray-500 hover:text-gray-700 px-3 py-2"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        disabled={addingMilestone || !newMilestone.title.trim()}
+                        onClick={() => handleCreateMilestone(phase.id)}
+                        className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-care-orange text-white text-sm font-bold hover:bg-orange-600 disabled:opacity-50 shadow-md"
+                      >
+                        {addingMilestone ? (
+                          <Clock size={16} className="animate-spin" />
+                        ) : (
+                          <Plus size={16} />
+                        )}
+                        Create
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}
 
-              {/* Milestones */}
-              {isExpanded && phaseMilestones.length > 0 && (
-                <div className="ml-16 mt-3 space-y-3">
-                  {phaseMilestones.map((milestone) => (
-                    <div 
+              {/* Milestones list */}
+              {isExpanded && getPhaseMilestones(phase.id).length > 0 && (
+                <div className="border-t-2 border-gray-100 px-5 py-4 space-y-3 bg-gray-50">
+                  {getPhaseMilestones(phase.id).map((milestone) => (
+                    <div
                       key={milestone.id}
-                      className={`bg-white rounded-xl border border-gray-100 overflow-hidden shadow-sm hover:shadow-md transition-all ${
-                        expandedMilestone === milestone.id ? 'ring-2 ring-care-orange/30' : ''
-                      }`}
+                      className="rounded-xl border-2 border-gray-200 bg-white shadow-sm overflow-hidden"
                     >
-                      {/* Milestone Header */}
-                      <div 
-                        className="p-4 cursor-pointer"
-                        onClick={() => setExpandedMilestone(expandedMilestone === milestone.id ? null : milestone.id)}
+                      {/* Milestone header */}
+                      <div
+                        className="p-4 flex items-start gap-4 cursor-pointer hover:bg-gray-50 transition-colors"
+                        onClick={() =>
+                          setExpandedMilestone(
+                            expandedMilestone === milestone.id ? null : milestone.id
+                          )
+                        }
                       >
-                        <div className="flex items-start gap-3">
-                          <div className={`mt-0.5 ${
-                            milestone.status === 'completed' ? 'text-green-500' :
-                            milestone.status === 'in-progress' ? 'text-care-orange' :
-                            'text-gray-300'
-                          }`}>
-                            {milestone.status === 'completed' ? (
-                              <CheckCircle2 size={20} />
-                            ) : milestone.status === 'in-progress' ? (
-                              <Clock size={20} />
-                            ) : (
-                              <Circle size={20} />
-                            )}
-                          </div>
-                          
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <h4 className="text-sm font-bold text-gray-900">{milestone.title}</h4>
-                              <span className={`text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${
-                                milestone.status === 'completed' ? 'bg-green-100 text-green-700' :
-                                milestone.status === 'in-progress' ? 'bg-care-orange/10 text-care-orange' :
-                                'bg-gray-100 text-gray-500'
-                              }`}>
-                                {milestone.status}
-                              </span>
+                        <div className="shrink-0">
+                          {getStatusIcon(milestone.status)}
+                        </div>
+                        <div className="flex-1 min-w-0 space-y-3">
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="min-w-0 space-y-2 flex-1">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                {/* Click-to-edit title */}
+                                {editingMilestoneTitle === milestone.id ? (
+                                  <input
+                                    autoFocus
+                                    value={titleDraft}
+                                    onChange={(e) => setTitleDraft(e.target.value)}
+                                    onBlur={() => commitTitle(milestone.id)}
+                                    onKeyDown={(e) => handleTitleKeyDown(e, milestone.id)}
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="text-base font-bold text-gray-900 bg-white border-2 border-orange-400 rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-orange-500 flex-1 min-w-0"
+                                  />
+                                ) : (
+                                  <h4
+                                    className="text-base font-bold text-gray-900 cursor-text hover:text-orange-600 flex items-center gap-2"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      startEditingTitle(milestone);
+                                    }}
+                                  >
+                                    {milestone.title}
+                                    <Edit3 size={14} className="text-gray-400" />
+                                  </h4>
+                                )}
+                                {renderStatusBadge(milestone.status)}
+                              </div>
+
+                              {/* Click-to-edit description */}
+                              {editingMilestoneDesc === milestone.id ? (
+                                <textarea
+                                  autoFocus
+                                  value={descDraft}
+                                  onChange={(e) => setDescDraft(e.target.value)}
+                                  onBlur={() => commitDesc(milestone.id)}
+                                  onKeyDown={(e) => handleDescKeyDown(e, milestone.id)}
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="w-full text-sm text-gray-600 bg-white border-2 border-orange-400 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-orange-500 resize-none"
+                                  rows={2}
+                                />
+                              ) : (
+                                <p
+                                  className="text-sm text-gray-600 cursor-text hover:text-gray-800 line-clamp-2 flex items-start gap-2"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    startEditingDesc(milestone);
+                                  }}
+                                >
+                                  {milestone.description || (
+                                    <span className="text-gray-400 italic">Click to add notes...</span>
+                                  )}
+                                  <Edit3 size={12} className="text-gray-400 shrink-0 mt-0.5" />
+                                </p>
+                              )}
                             </div>
-                            {milestone.description && (
-                              <p className="text-xs text-gray-500 mt-1 line-clamp-2">{milestone.description}</p>
-                            )}
-                            <div className="flex items-center gap-4 mt-2 text-[11px] text-gray-400">
-                              <span className="flex items-center gap-1">
-                                <Calendar size={12} />
-                                {formatDate(milestone.date)}
-                              </span>
-                              {milestone.imageUrls && milestone.imageUrls.length > 0 && (
-                                <span className="flex items-center gap-1">
-                                  <ImageIcon size={12} />
-                                  {milestone.imageUrls.length} photo{milestone.imageUrls.length !== 1 ? 's' : ''}
-                                </span>
-                              )}
-                              {milestone.comments && milestone.comments.length > 0 && (
-                                <span className="flex items-center gap-1">
-                                  <MessageSquare size={12} />
-                                  {milestone.comments.length} comment{milestone.comments.length !== 1 ? 's' : ''}
-                                </span>
-                              )}
+
+                            <div className="flex flex-col items-end gap-2 shrink-0">
+                              <p className="text-sm text-gray-500 flex items-center gap-1.5 font-medium">
+                                <Calendar size={14} />
+                                <span>{formatDate(milestone.date)}</span>
+                              </p>
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleDeleteMilestone(milestone.id);
+                                  }}
+                                  className="p-2 rounded-lg bg-red-100 text-red-600 hover:bg-red-200 transition-colors"
+                                  title="Delete milestone"
+                                >
+                                  <Trash2 size={16} />
+                                </button>
+                                <div className="w-8 h-8 rounded-full bg-gray-100 border border-gray-200 flex items-center justify-center">
+                                  {expandedMilestone === milestone.id ? (
+                                    <ChevronUp size={18} />
+                                  ) : (
+                                    <ChevronDown size={18} />
+                                  )}
+                                </div>
+                              </div>
                             </div>
                           </div>
 
-                          {/* Thumbnail preview */}
-                          {milestone.imageUrls && milestone.imageUrls.length > 0 && (
-                            <div className="flex -space-x-2">
-                              {milestone.imageUrls.slice(0, 3).map((url, i) => (
-                                <img
-                                  key={i}
-                                  src={url}
-                                  alt=""
-                                  className="w-10 h-10 rounded-lg object-cover border-2 border-white shadow-sm"
-                                />
-                              ))}
-                              {milestone.imageUrls.length > 3 && (
-                                <div className="w-10 h-10 rounded-lg bg-gray-100 border-2 border-white flex items-center justify-center text-[10px] font-bold text-gray-500">
-                                  +{milestone.imageUrls.length - 3}
-                                </div>
-                              )}
-                            </div>
-                          )}
+                          {/* Status buttons */}
+                          <div className="flex flex-wrap gap-2 pt-1">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleStatusChange(milestone, 'pending');
+                              }}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-gray-100 text-xs font-semibold text-gray-700 border border-gray-300 hover:bg-gray-200 transition-colors"
+                            >
+                              Pending
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleStatusChange(milestone, 'in-progress');
+                              }}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-orange-100 text-xs font-semibold text-orange-700 border border-orange-300 hover:bg-orange-200 transition-colors"
+                            >
+                              In Progress
+                            </button>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleStatusChange(milestone, 'completed');
+                              }}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-green-100 text-xs font-semibold text-green-700 border border-green-300 hover:bg-green-200 transition-colors"
+                            >
+                              Complete
+                            </button>
+                          </div>
                         </div>
                       </div>
 
-                      {/* Expanded Content */}
+                      {/* Milestone body */}
                       {expandedMilestone === milestone.id && (
-                        <div className="border-t border-gray-100">
-                          {/* Status Toggle */}
-                          <div className="p-4 bg-gray-50/50 flex items-center gap-2">
-                            <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mr-2">Status:</span>
-                            {(['pending', 'in-progress', 'completed'] as const).map((s) => (
-                              <button
-                                key={s}
-                                onClick={() => onUpdateMilestone(milestone.id, { status: s })}
-                                className={`px-3 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-all ${
-                                  milestone.status === s
-                                    ? s === 'completed' ? 'bg-green-500 text-white' :
-                                      s === 'in-progress' ? 'bg-care-orange text-white' :
-                                      'bg-gray-300 text-gray-700'
-                                    : 'bg-white border border-gray-200 text-gray-500 hover:border-gray-300'
-                                }`}
-                              >
-                                {s}
-                              </button>
-                            ))}
-                          </div>
-
+                        <div className="border-t-2 border-gray-100 p-4 space-y-4 bg-gray-50">
                           {/* Photos */}
                           {milestone.imageUrls && milestone.imageUrls.length > 0 && (
-                            <div className="p-4 border-t border-gray-100">
-                              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3">Photos</p>
-                              <div className="grid grid-cols-4 gap-2">
-                                {milestone.imageUrls.map((url, i) => (
+                            <div className="space-y-2">
+                              <p className="flex items-center gap-1.5 text-xs font-bold text-gray-600 uppercase tracking-wider">
+                                <ImageIcon size={14} />
+                                Photos
+                              </p>
+                              <div className="flex flex-wrap gap-2">
+                                {milestone.imageUrls.map((url, idx) => (
                                   <button
-                                    key={i}
+                                    key={`${milestone.id}-img-${idx}`}
+                                    type="button"
+                                    className="w-20 h-20 rounded-lg overflow-hidden border-2 border-gray-200 bg-gray-50 hover:border-orange-400 transition-colors"
                                     onClick={() => setSelectedImage(url)}
-                                    className="aspect-square rounded-xl overflow-hidden hover:opacity-90 transition-opacity"
                                   >
-                                    <img src={url} alt="" className="w-full h-full object-cover" />
+                                    <img
+                                      src={url}
+                                      alt=""
+                                      className="w-full h-full object-cover"
+                                    />
                                   </button>
                                 ))}
-                                <label className="aspect-square rounded-xl border-2 border-dashed border-gray-200 flex flex-col items-center justify-center cursor-pointer hover:border-care-orange hover:bg-care-orange/5 transition-colors">
-                                  <Camera size={20} className="text-gray-400" />
-                                  <span className="text-[9px] font-bold text-gray-400 mt-1">Add</span>
-                                  <input
-                                    type="file"
-                                    accept="image/*"
-                                    className="hidden"
-                                    onChange={async (e) => {
-                                      const file = e.target.files?.[0];
-                                      if (file) {
-                                        await onUploadMilestoneImage(milestone.id, file);
-                                      }
-                                    }}
-                                  />
-                                </label>
                               </div>
                             </div>
                           )}
 
                           {/* Comments */}
-                          <div className="p-4 border-t border-gray-100">
-                            <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-3">Comments</p>
-                            
-                            {milestone.comments && milestone.comments.length > 0 && (
-                              <div className="space-y-3 mb-4 max-h-60 overflow-y-auto">
+                          <div className="space-y-3">
+                            <p className="flex items-center gap-1.5 text-xs font-bold text-gray-600 uppercase tracking-wider">
+                              <MessageSquare size={14} />
+                              Updates & Notes
+                            </p>
+
+                            {milestone.comments && milestone.comments.length > 0 ? (
+                              <div className="space-y-2 max-h-48 overflow-y-auto">
                                 {milestone.comments.map((comment) => (
-                                  <div key={comment.id} className="flex gap-3">
-                                    <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-xs font-bold text-gray-500 shrink-0">
-                                      {comment.author.charAt(0).toUpperCase()}
-                                    </div>
-                                    <div className="flex-1 min-w-0">
+                                  <div
+                                    key={comment.id}
+                                    className="rounded-lg bg-white px-3 py-2.5 space-y-1.5 border border-gray-200"
+                                  >
+                                    <div className="flex items-center justify-between gap-2">
                                       <div className="flex items-center gap-2">
-                                        <span className="text-xs font-bold text-gray-900">{comment.author}</span>
-                                        <span className="text-[10px] text-gray-400">{formatDateTime(comment.timestamp)}</span>
+                                        <div className="w-7 h-7 rounded-full bg-gray-900 text-white text-sm font-bold flex items-center justify-center">
+                                          {comment.author?.charAt(0)?.toUpperCase() || '?'}
+                                        </div>
+                                        <span className="text-sm font-bold text-gray-800">
+                                          {comment.author || 'Unknown'}
+                                        </span>
                                       </div>
-                                      <p className="text-xs text-gray-600 mt-0.5">{comment.content}</p>
-                                      {comment.imageUrl && (
-                                        <button
-                                          onClick={() => setSelectedImage(comment.imageUrl!)}
-                                          className="mt-2"
-                                        >
-                                          <img 
-                                            src={comment.imageUrl} 
-                                            alt="" 
-                                            className="max-h-32 rounded-lg border border-gray-200 hover:opacity-90 transition-opacity"
-                                          />
-                                        </button>
-                                      )}
+                                      <span className="text-xs text-gray-400">
+                                        {formatDate(comment.timestamp)}
+                                      </span>
                                     </div>
+                                    {comment.content && (
+                                      <p className="text-sm text-gray-700 leading-relaxed">
+                                        {comment.content}
+                                      </p>
+                                    )}
+                                    {comment.imageUrl && (
+                                      <button
+                                        type="button"
+                                        className="mt-1 inline-flex items-center gap-1 text-sm text-care-orange font-medium hover:text-orange-600"
+                                        onClick={() => setSelectedImage(comment.imageUrl!)}
+                                      >
+                                        <ImageIcon size={14} />
+                                        View image
+                                      </button>
+                                    )}
                                   </div>
                                 ))}
                               </div>
+                            ) : (
+                              <p className="text-sm text-gray-400 italic">
+                                No updates yet. Use the form below to add one.
+                              </p>
                             )}
 
-                            {/* Add Comment */}
-                            <div className="flex gap-2">
-                              <div className="w-8 h-8 rounded-full bg-care-orange/10 flex items-center justify-center text-xs font-bold text-care-orange shrink-0">
-                                {currentUser.name.charAt(0).toUpperCase()}
-                              </div>
-                              <div className="flex-1 space-y-2">
-                                <textarea
-                                  value={commentText}
-                                  onChange={(e) => setCommentText(e.target.value)}
-                                  placeholder="Add a comment..."
-                                  rows={2}
-                                  className="w-full px-3 py-2 text-xs border border-gray-200 rounded-lg focus:border-care-orange focus:ring-0 resize-none"
-                                />
-                                {commentImagePreview && (
-                                  <div className="relative inline-block">
-                                    <img src={commentImagePreview} alt="" className="h-16 rounded-lg border border-gray-200" />
-                                    <button
-                                      onClick={clearCommentImage}
-                                      className="absolute -top-1.5 -right-1.5 bg-red-500 text-white rounded-full p-0.5"
-                                    >
-                                      <X size={12} />
-                                    </button>
-                                  </div>
-                                )}
-                                <div className="flex items-center justify-between">
-                                  <label className="flex items-center gap-1.5 text-xs text-gray-500 cursor-pointer hover:text-care-orange transition-colors">
-                                    <Camera size={14} />
-                                    <span className="font-medium">Photo</span>
+                            {/* Add comment */}
+                            <div className="rounded-lg border-2 border-dashed border-gray-300 bg-white p-3 space-y-3">
+                              <textarea
+                                value={commentText}
+                                onChange={(e) => setCommentText(e.target.value)}
+                                className="w-full text-sm rounded-lg border-2 border-gray-300 px-3 py-2 focus:outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-200 resize-none"
+                                rows={2}
+                                placeholder="Add a quick update or note..."
+                              />
+
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="flex items-center gap-2">
+                                  <label className="inline-flex items-center gap-1.5 text-sm text-gray-600 cursor-pointer hover:text-gray-800 font-medium">
+                                    <Camera size={16} />
+                                    <span>Add photo</span>
                                     <input
                                       type="file"
                                       accept="image/*"
                                       className="hidden"
-                                      onChange={handleCommentImageSelect}
+                                      onChange={handleCommentImageChange}
                                     />
                                   </label>
-                                  <button
-                                    onClick={() => handleAddComment(milestone.id)}
-                                    disabled={(!commentText.trim() && !commentImage) || addingComment}
-                                    className="px-4 py-1.5 bg-[#1A1A1A] text-white rounded-lg text-xs font-bold disabled:opacity-50 flex items-center gap-2"
-                                  >
-                                    {addingComment ? <Loader2 size={12} className="animate-spin" /> : <MessageSquare size={12} />}
-                                    Post
-                                  </button>
+                                  {commentImagePreview && (
+                                    <button
+                                      type="button"
+                                      className="relative w-10 h-10 rounded-lg overflow-hidden border-2 border-gray-200 bg-gray-100"
+                                      onClick={() => setSelectedImage(commentImagePreview)}
+                                    >
+                                      <img
+                                        src={commentImagePreview}
+                                        alt=""
+                                        className="w-full h-full object-cover"
+                                      />
+                                      <span className="absolute -top-1 -right-1 bg-white rounded-full border border-gray-300 p-0.5">
+                                        <X size={12} />
+                                      </span>
+                                    </button>
+                                  )}
                                 </div>
+
+                                <button
+                                  type="button"
+                                  disabled={
+                                    addingCommentFor === milestone.id ||
+                                    (!commentText.trim() && !commentImage)
+                                  }
+                                  onClick={() => handleAddComment(milestone.id)}
+                                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-black text-white text-sm font-bold hover:bg-gray-800 disabled:opacity-50"
+                                >
+                                  {addingCommentFor === milestone.id ? (
+                                    <Clock size={16} className="animate-spin" />
+                                  ) : (
+                                    <MessageSquare size={16} />
+                                  )}
+                                  Post
+                                </button>
                               </div>
                             </div>
                           </div>
@@ -633,38 +895,28 @@ const ProjectTimeline: React.FC<ProjectTimelineProps> = ({
                   ))}
                 </div>
               )}
-
-              {/* Empty state for expanded phase */}
-              {isExpanded && phaseMilestones.length === 0 && status !== 'upcoming' && (
-                <div className="ml-16 mt-3 p-6 bg-gray-50 rounded-xl border border-dashed border-gray-200 text-center">
-                  <div className="w-12 h-12 rounded-full bg-gray-100 flex items-center justify-center mx-auto mb-3">
-                    <Plus size={20} className="text-gray-400" />
-                  </div>
-                  <p className="text-xs font-bold text-gray-500">No milestones yet</p>
-                  <p className="text-[11px] text-gray-400 mt-1">Click the + button to add your first milestone</p>
-                </div>
-              )}
             </div>
           );
         })}
       </div>
 
-      {/* Image Lightbox */}
+      {/* Image lightbox */}
       {selectedImage && (
-        <div 
-          className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-4"
+        <div
+          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4"
           onClick={() => setSelectedImage(null)}
         >
           <button
+            type="button"
+            className="absolute top-4 right-4 p-3 rounded-full bg-black/70 text-white hover:bg-black"
             onClick={() => setSelectedImage(null)}
-            className="absolute top-4 right-4 text-white/80 hover:text-white p-2"
           >
-            <X size={28} />
+            <X size={24} />
           </button>
-          <img 
-            src={selectedImage} 
-            alt="" 
-            className="max-w-full max-h-[90vh] rounded-lg"
+          <img
+            src={selectedImage}
+            alt=""
+            className="max-w-full max-h-[90vh] rounded-lg shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           />
         </div>

@@ -16,6 +16,7 @@ import {
   uploadProjectUpdateImage,
   addMilestone,
   updateMilestone,
+  deleteMilestone,
   addMilestoneComment,
   uploadMilestoneImage,
   subscribeToCalendarEvents,
@@ -302,6 +303,19 @@ const App: React.FC = () => {
     }
   };
 
+  const handleDeleteMilestone = async (
+    projectId: string,
+    milestoneId: string
+  ) => {
+    try {
+      await deleteMilestone(projectId, milestoneId);
+      showToast('Milestone deleted!', 'success');
+    } catch (error: any) {
+      showToast(error.message || 'Failed to delete milestone', 'error');
+      throw error;
+    }
+  };
+
   const handleAddMilestoneComment = async (
     projectId: string,
     milestoneId: string,
@@ -480,6 +494,9 @@ const App: React.FC = () => {
                 onAddMilestone={(milestone) => handleAddMilestone(currentProject.id, milestone)}
                 onUpdateMilestone={(milestoneId, updates) => 
                   handleUpdateMilestone(currentProject.id, milestoneId, updates)
+                }
+                onDeleteMilestone={(milestoneId) => 
+                  handleDeleteMilestone(currentProject.id, milestoneId)
                 }
                 onAddComment={(milestoneId, content, imageFile) =>
                   handleAddMilestoneComment(currentProject.id, milestoneId, content, imageFile)

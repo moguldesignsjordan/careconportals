@@ -514,12 +514,13 @@ const App: React.FC = () => {
           />
         );
 
-      case 'documents':
+        case 'documents':
         return (
           <DocumentsTab
             documents={documents}
             currentUser={user}
             users={users}
+            projects={projects}          // 👈 add this line
             onUpload={handleUploadDocument}
             onDelete={handleDeleteDocument}
           />

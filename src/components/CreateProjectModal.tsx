@@ -258,24 +258,28 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
 
     setLoading(true);
     try {
-      await onCreate({
+        await onCreate({
         title: formData.title.trim(),
         description: formData.description.trim(),
         status: ProjectStatus.PLANNING,
         progress: 0,
         // Primary IDs for backwards compatibility
         clientId: formData.primaryClientId || formData.clientIds[0],
-        contractorId: formData.primaryContractorId || formData.contractorIds[0] || currentUser.id,
+        contractorId:
+          formData.primaryContractorId ||
+          formData.contractorIds[0] ||
+          currentUser.id,
         // Multi-select arrays
         clientIds: formData.clientIds,
-        contractorIds: formData.contractorIds.length > 0 ? formData.contractorIds : [currentUser.id],
+        contractorIds:
+          formData.contractorIds.length > 0 ? formData.contractorIds : [currentUser.id],
         startDate: formData.startDate,
         estimatedEndDate: formData.estimatedEndDate,
         budget: parseFloat(formData.budget) || 0,
         spent: 0,
-        updates: [],
-        milestones: []
+        milestones: []            // ✅ keep if you want
       });
+
       onClose();
     } catch (err: any) {
       setError(err.message || 'Failed to create project');

@@ -1,4 +1,3 @@
-// src/services/db.ts
 import { 
   collection, 
   onSnapshot, 
@@ -608,48 +607,91 @@ export const getUser = async (userId: string): Promise<User | null> => {
  * Subscribe to documents, with optional project filters
  */
 export const subscribeToDocuments = (
-  callback: (documents: ProjectDocument[]) => void, 
+  callback: (documents: ProjectDocument[]) => void,
   options?: {
     projectId?: string;
     projectIds?: string[];
   }
 ) => {
   let q;
-  
+
   if (options?.projectId) {
     // Filter by single project
     q = query(
-      collection(db, 'documents'), 
-      where('projectId', '==', options.projectId), 
+      collection(db, 'documents'),
+      where('projectId', '==', options.projectId),
       orderBy('uploadedAt', 'desc')
     );
   } else if (options?.projectIds && options.projectIds.length > 0) {
-    // Filter by multiple projects - Firestore IN queries support up to 10 values in some SDKs,
-    // to be safe we limit to 30 but you may adjust based on your requirements.
-    const limitedProjectIds = options.projectIds.slice(0, 30);
+    // Filter by multiple projects (limited to 10 for Firestore "in" queries)
+    const limitedProjectIds = options.projectIds.slice(0, 10);
     q = query(
-      collection(db, 'documents'), 
-      where('projectId', 'in', limitedProjectIds), 
+      collection(db, 'documents'),
+      where('projectId', 'in', limitedProjectIds),
       orderBy('uploadedAt', 'desc')
     );
   } else {
     // No filter - admin view or general list
-    q = query(
-      collection(db, 'documents'), 
-      orderBy('uploadedAt', 'desc')
-    );
+    q = query(collection(db, 'documents'), orderBy('uploadedAt', 'desc'));
   }
 
-  return onSnapshot(q, (snapshot) => {
-    const documents = snapshot.docs.map(doc => ({ 
-      id: doc.id, 
-      ...doc.data() 
-    } as ProjectDocument));
-    callback(documents);
-  }, (error) => {
-    console.error("Error fetching documents:", error);
-    callback([]);
-  });
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const documents = snapshot.docs.map(
+        (docSnap) =>
+          ({
+            id: docSnap.id,
+            ...docSnap.data(),
+          } as ProjectDocument)
+      );
+      callback(documents);
+    },
+    (error) => {
+      console.error('Error fetching documents:', error);
+      callback([]);
+    }
+  );
+};
+
+// ===== GLOBAL DOCUMENT DELETE (used by DocumentsTab / Project docs) =====
+export const deleteDocument = async (
+  docId: string,
+  fileUrl?: string
+): Promise<void> => {
+  try {
+    const docRef = doc(db, 'documents', docId);
+
+    // Optional: try to delete from Storage if we know the path/URL
+    if (fileUrl) {
+      try {
+        const storageRef = ref(storage, fileUrl);
+        await deleteObject(storageRef);
+      } catch (err) {
+        console.warn('Failed to delete storage object (using URL):', err);
+      }
+    }
+
+    await deleteDoc(docRef);
+  } catch (error) {
+    console.error('Error deleting document:', error);
+    throw error;
+  }
+};
+
+
+// ========= PROJECT DOCUMENTS: DELETE BY PROJECT =========
+export const deleteProjectDocument = async (
+  projectId: string,
+  docId: string
+): Promise<void> => {
+  try {
+    const docRef = doc(db, 'documents', docId);
+    await deleteDoc(docRef);
+  } catch (err) {
+    console.error('Error deleting project document', err);
+    throw err;
+  }
 };
 
 /**
@@ -664,15 +706,15 @@ export const subscribeToUserDocuments = (
     // Admin sees all documents
     return subscribeToDocuments(callback);
   }
-  
+
   // Get project IDs the user has access to
-  const accessibleProjectIds = projects.map(p => p.id);
-  
+  const accessibleProjectIds = projects.map((p) => p.id);
+
   if (accessibleProjectIds.length === 0) {
     callback([]);
     return () => {}; // Return empty unsubscribe function
   }
-  
+
   return subscribeToDocuments(callback, { projectIds: accessibleProjectIds });
 };
 
@@ -687,8 +729,25 @@ export const subscribeToProjectDocuments = (
   return subscribeToDocuments(callback, { projectId });
 };
 
+/**
+ * Helper to format file size nice and short (e.g. "2.4 MB")
+ */
+const formatFileSize = (bytes: number): string => {
+  if (!bytes) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let size = bytes;
+  let unitIndex = 0;
+
+  while (size >= 1024 && unitIndex < units.length - 1) {
+    size /= 1024;
+    unitIndex++;
+  }
+
+  return `${size.toFixed(1)} ${units[unitIndex]}`;
+};
+
 export const uploadDocument = async (
-  file: File, 
+  file: File,
   metadata: Omit<ProjectDocument, 'id' | 'fileUrl' | 'uploadedAt' | 'fileSize'>
 ) => {
   try {
@@ -700,13 +759,13 @@ export const uploadDocument = async (
       ...metadata,
       fileUrl,
       fileSize: formatFileSize(file.size),
-      uploadedAt: new Date().toISOString()
+      uploadedAt: new Date().toISOString(),
     };
 
     const docRef = await addDoc(collection(db, 'documents'), docData);
     return { id: docRef.id, ...docData };
   } catch (error) {
-    console.error("Error uploading document:", error);
+    console.error('Error uploading document:', error);
     throw error;
   }
 };
@@ -729,26 +788,13 @@ export const uploadProjectDocument = async (
   });
 };
 
-export const deleteProjectDocument = async (
-  projectId: string,
-  docId: string
-): Promise<void> => {
-  try {
-    const docRef = doc(db, 'documents', docId);
-    await deleteDoc(docRef);
-  } catch (err) {
-    console.error('Error deleting project document', err);
-    throw err;
-  }
-};
-
 // ============ MESSAGES ============
 
 /**
  * Subscribe to messages for a user
  */
 export const subscribeToMessages = (
-  userId: string, 
+  userId: string,
   callback: (messages: any[]) => void
 ) => {
   const q = query(
@@ -757,16 +803,20 @@ export const subscribeToMessages = (
     orderBy('timestamp', 'asc')
   );
 
-  return onSnapshot(q, (snapshot) => {
-    const messages = snapshot.docs.map(doc => ({ 
-      id: doc.id, 
-      ...doc.data() 
-    }));
-    callback(messages);
-  }, (error) => {
-    console.error("Error fetching messages:", error);
-    callback([]);
-  });
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const messages = snapshot.docs.map((docSnap) => ({
+        id: docSnap.id,
+        ...docSnap.data(),
+      }));
+      callback(messages);
+    },
+    (error) => {
+      console.error('Error fetching messages:', error);
+      callback([]);
+    }
+  );
 };
 
 /**
@@ -783,20 +833,27 @@ export const subscribeToProjectMessages = (
     orderBy('timestamp', 'asc')
   );
 
-  return onSnapshot(q, (snapshot) => {
-    const allMessages = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-    
-    // Filter messages client-side by accessible projects
-    const filteredMessages = allMessages.filter(msg => {
-      if (!msg.projectId) return true; // Non-project messages
-      return accessibleProjectIds.includes(msg.projectId);
-    });
-    
-    callback(filteredMessages);
-  }, (error) => {
-    console.error("Error fetching project messages:", error);
-    callback([]);
-  });
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const allMessages: any[] = snapshot.docs.map((docSnap) => ({
+        id: docSnap.id,
+        ...docSnap.data(),
+      }));
+
+      // Filter messages client-side by accessible projects
+      const filteredMessages = allMessages.filter((msg: any) => {
+        if (!msg.projectId) return true; // Non-project messages
+        return accessibleProjectIds.includes(msg.projectId);
+      });
+
+      callback(filteredMessages);
+    },
+    (error) => {
+      console.error('Error fetching project messages:', error);
+      callback([]);
+    }
+  );
 };
 
 /**
@@ -809,36 +866,41 @@ export const sendMessage = async (
   projectId?: string
 ) => {
   try {
+    const participants = [senderId, receiverId].sort();
     const messageData = {
       senderId,
       receiverId,
+      participants,
       content,
       projectId: projectId || null,
-      timestamp: new Date().toISOString(),
-      participants: [senderId, receiverId]
+      timestamp: Timestamp.now(),
     };
 
-    const docRef = await addDoc(collection(db, 'messages'), messageData);
-    return { id: docRef.id, ...messageData };
+    await addDoc(collection(db, 'messages'), messageData);
   } catch (error) {
-    console.error("Error sending message:", error);
+    console.error('Error sending message:', error);
     throw error;
   }
 };
 
 // ============ PROFILE IMAGE ============
 
-export const uploadProfileImage = async (userId: string, file: File): Promise<string> => {
+export const uploadProfileImage = async (
+  userId: string,
+  file: File
+): Promise<string> => {
   try {
     const storageRef = ref(storage, `avatars/${userId}_${Date.now()}`);
     const snapshot = await uploadBytes(storageRef, file);
     const downloadURL = await getDownloadURL(snapshot.ref);
-    
-    await updateUser(userId, { avatar: downloadURL });
-    
+
+    // Update user document with new avatar URL
+    const userRef = doc(db, 'users', userId);
+    await updateDoc(userRef, { avatarUrl: downloadURL });
+
     return downloadURL;
   } catch (error) {
-    console.error("Error uploading profile image:", error);
+    console.error('Error uploading profile image:', error);
     throw error;
   }
 };
@@ -849,15 +911,21 @@ export interface CalendarEvent {
   id: string;
   title: string;
   description?: string;
-  date: string;
-  startTime: string;
+  date: string; // ISO (YYYY-MM-DD)
+  startTime: string; // HH:MM
   endTime?: string;
   location?: string;
-  type: 'inspection' | 'meeting' | 'delivery' | 'site-visit' | 'deadline' | 'other';
+  type:
+    | 'inspection'
+    | 'meeting'
+    | 'delivery'
+    | 'site-visit'
+    | 'deadline'
+    | 'other';
   projectId?: string;
+  attendeeIds: string[];
   createdBy: string;
-  attendees?: string[];
-  createdAt?: string;
+  createdAt: string;
 }
 
 export const subscribeToCalendarEvents = (
@@ -866,12 +934,10 @@ export const subscribeToCalendarEvents = (
   callback: (events: CalendarEvent[]) => void
 ) => {
   let q;
-  
+
   if (userRole === UserRole.ADMIN) {
-    // Admin sees all events
     q = query(collection(db, 'calendarEvents'), orderBy('date', 'asc'));
   } else {
-    // Other users see events where they are an attendee
     q = query(
       collection(db, 'calendarEvents'),
       where('attendees', 'array-contains', userId),
@@ -879,99 +945,107 @@ export const subscribeToCalendarEvents = (
     );
   }
 
-  return onSnapshot(q, (snapshot) => {
-    const events = snapshot.docs.map(doc => ({ 
-      id: doc.id, 
-      ...doc.data() 
-    } as CalendarEvent));
-    callback(events);
-  }, (error) => {
-    console.error("Error fetching calendar events:", error);
-    callback([]);
-  });
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const events: CalendarEvent[] = snapshot.docs.map((docSnap) => {
+        const data = docSnap.data() as any;
+        return {
+          id: docSnap.id,
+          title: data.title,
+          description: data.description,
+          date: data.date,
+          startTime: data.startTime,
+          endTime: data.endTime,
+          location: data.location,
+          type: data.type,
+          projectId: data.projectId,
+          attendeeIds: data.attendees || data.attendeeIds || [],
+          createdBy: data.createdBy,
+          createdAt: data.createdAt || '',
+        };
+      });
+      callback(events);
+    },
+    (error) => {
+      console.error('Error fetching calendar events:', error);
+      callback([]);
+    }
+  );
 };
 
 export const createCalendarEvent = async (
   eventData: Omit<CalendarEvent, 'id' | 'createdAt'>
 ) => {
   try {
-    const docRef = await addDoc(collection(db, 'calendarEvents'), {
-      ...eventData,
-      createdAt: new Date().toISOString()
-    });
-    
-    return { id: docRef.id, ...eventData };
+    const createdAt = new Date().toISOString();
+
+    const payload = {
+      title: eventData.title,
+      description: eventData.description,
+      date: eventData.date,
+      startTime: eventData.startTime,
+      endTime: eventData.endTime,
+      location: eventData.location,
+      type: eventData.type,
+      projectId: eventData.projectId || null,
+      attendees: eventData.attendeeIds,
+      createdBy: eventData.createdBy,
+      createdAt,
+    };
+
+    const docRef = await addDoc(collection(db, 'calendarEvents'), payload);
+    return { id: docRef.id, ...eventData, createdAt };
   } catch (error) {
-    console.error("Error creating calendar event:", error);
+    console.error('Error creating calendar event:', error);
     throw error;
   }
 };
 
 export const updateCalendarEvent = async (
-  eventId: string, 
-  updates: Partial<CalendarEvent>
+  eventId: string,
+  updates: Partial<Omit<CalendarEvent, 'id' | 'createdAt' | 'createdBy'>>
 ) => {
   try {
     const eventRef = doc(db, 'calendarEvents', eventId);
-    await updateDoc(eventRef, updates);
+    
+    // Map attendeeIds to attendees for Firestore storage
+    const payload: Record<string, any> = { ...updates };
+    if (updates.attendeeIds) {
+      payload.attendees = updates.attendeeIds;
+      delete payload.attendeeIds;
+    }
+    
+    await updateDoc(eventRef, payload);
   } catch (error) {
-    console.error("Error updating calendar event:", error);
+    console.error('Error updating calendar event:', error);
     throw error;
   }
 };
 
 export const deleteCalendarEvent = async (eventId: string) => {
   try {
-    await deleteDoc(doc(db, 'calendarEvents', eventId));
+    const eventRef = doc(db, 'calendarEvents', eventId);
+    await deleteDoc(eventRef);
   } catch (error) {
-    console.error("Error deleting calendar event:", error);
+    console.error('Error deleting calendar event:', error);
     throw error;
   }
 };
 
-// ============ HELPERS ============
+// ============ PROJECT TEAM HELPERS ============
 
-function formatFileSize(bytes: number): string {
-  if (bytes === 0) return '0 Bytes';
-  const k = 1024;
-  const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-}
-
-/**
- * Check if user has access to a given project
- */
-export const userHasProjectAccess = (user: User, project: Project): boolean => {
-  if (user.role === UserRole.ADMIN) return true;
-  
-  if (user.role === UserRole.CONTRACTOR) {
-    const contractorIds = project.contractorIds || [project.contractorId];
-    return contractorIds.includes(user.id);
-  }
-  
-  if (user.role === UserRole.CLIENT) {
-    const clientIds = project.clientIds || [project.clientId];
-    return clientIds.includes(user.id);
-  }
-  
-  return false;
-};
-
-/**
- * Derive project team members from users list
- */
 export const getProjectTeamMembers = (project: Project, users: User[]) => {
   const clientIds = project.clientIds || [project.clientId];
   const contractorIds = project.contractorIds || [project.contractorId];
 
-  const clients = users.filter(u => clientIds.includes(u.id));
-  const contractors = users.filter(u => contractorIds.includes(u.id));
-  
+  const clients = users.filter((u) => clientIds.includes(u.id));
+  const contractors = users.filter((u) => contractorIds.includes(u.id));
+
   return {
     clients,
     contractors,
-    primaryClient: users.find(u => u.id === project.clientId),
-    primaryContractor: users.find(u => u.id === project.contractorId)
+    primaryClient: users.find((u) => u.id === project.clientId),
+    primaryContractor: users.find((u) => u.id === project.contractorId),
   };
 };

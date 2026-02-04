@@ -10,6 +10,8 @@ import {
   CheckCircle,
   DollarSign,
   MessageSquare,
+  Hourglass,
+  AlertCircle,
 } from 'lucide-react';
 import ProjectCard from './ProjectCard';
 
@@ -47,6 +49,15 @@ const DashboardContractor: React.FC<DashboardContractorProps> = ({
   const completedCount = myProjects.filter(
     (p) => String(p.status) === String(ProjectStatus.COMPLETED)
   ).length;
+
+  const pendingCount = myProjects.filter(
+    (p) => String(p.status) === String(ProjectStatus.PENDING_APPROVAL)
+  ).length;
+
+  // Projects the admin has rejected (still PENDING_APPROVAL but rejectionReason is set)
+  const rejectedProjects = myProjects.filter(
+    (p) => String(p.status) === String(ProjectStatus.PENDING_APPROVAL) && p.rejectionReason
+  );
 
   const totalBudget = myProjects.reduce(
     (sum, p) => sum + (p.budget || 0),
@@ -95,7 +106,7 @@ const DashboardContractor: React.FC<DashboardContractorProps> = ({
       </header>
 
       {/* Stats */}
-      <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <section className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
         <div className="bg-white border border-gray-100 rounded-2xl p-4 flex items-center gap-3">
           <div className="h-10 w-10 rounded-xl bg-[#1A1A1A]/95 flex items-center justify-center">
             <Hammer size={18} className="text-white" />
@@ -106,6 +117,21 @@ const DashboardContractor: React.FC<DashboardContractorProps> = ({
             </p>
             <p className="text-lg font-black text-[#111827]">
               {myProjects.length}
+            </p>
+          </div>
+        </div>
+
+        {/* ── Pending Approval (new) ── */}
+        <div className={`rounded-2xl p-4 flex items-center gap-3 border ${pendingCount > 0 ? 'bg-violet-50 border-violet-200' : 'bg-white border-gray-100'}`}>
+          <div className={`h-10 w-10 rounded-xl flex items-center justify-center ${pendingCount > 0 ? 'bg-violet-100' : 'bg-violet-50'}`}>
+            <Hourglass size={18} className="text-violet-600" />
+          </div>
+          <div>
+            <p className="text-[11px] text-gray-400 uppercase tracking-[0.18em]">
+              Awaiting Approval
+            </p>
+            <p className={`text-lg font-black ${pendingCount > 0 ? 'text-violet-700' : 'text-[#111827]'}`}>
+              {pendingCount}
             </p>
           </div>
         </div>
@@ -169,6 +195,17 @@ const DashboardContractor: React.FC<DashboardContractorProps> = ({
             <span>{averageProgress}% average progress</span>
           </div>
         </div>
+
+        {/* Rejection feedback banner – shown once per rejected project */}
+        {rejectedProjects.map((p) => (
+          <div key={p.id} className="flex items-start gap-3 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
+            <AlertCircle size={18} className="text-red-500 mt-0.5 shrink-0" />
+            <div className="text-xs">
+              <p className="font-black text-red-700">{p.name} – approval declined</p>
+              <p className="text-red-600 mt-0.5">{p.rejectionReason}</p>
+            </div>
+          </div>
+        ))}
 
         {myProjects.length === 0 ? (
           <div className="bg-white border border-dashed border-gray-200 rounded-2xl p-8 text-center text-xs text-gray-500">

@@ -15,6 +15,7 @@ import {
 import { Project, User, UserRole } from '../types';
 import EnhancedProjectCard from './EnhancedProjectCard';
 import ProjectKanban from './ProjectKanban';
+import { deleteProject } from '../services/db';
 
 type ViewMode = 'grid' | 'kanban' | 'list';
 type SortOption = 'recent' | 'progress' | 'budget' | 'due-date' | 'name';
@@ -41,10 +42,20 @@ const ProjectsHub: React.FC<ProjectsHubProps> = ({
   const [filterStatus, setFilterStatus] = useState<FilterStatus>('all');
   const [showFilters, setShowFilters] = useState(false);
 
+  const isAdmin = currentUser.role === UserRole.ADMIN;
+
+  // ── delete handler (calls db directly, same pattern as DashboardAdmin) ──
+  const handleDeleteProject = async (projectId: string) => {
+    try {
+      await deleteProject(projectId);
+    } catch (e) {
+      console.error('Delete project failed', e);
+    }
+  };
+
   // Filter and sort projects
   const filteredProjects = projects
     .filter(p => {
-      // Search filter
       if (searchQuery) {
         const query = searchQuery.toLowerCase();
         const matchesTitle = p.title.toLowerCase().includes(query);
@@ -325,6 +336,8 @@ const ProjectsHub: React.FC<ProjectsHubProps> = ({
                 users={users}
                 onClick={onProjectClick}
                 variant="compact"
+                isAdmin={isAdmin}
+                onDeleteProject={isAdmin ? handleDeleteProject : undefined}
               />
             ))
           )}
@@ -358,6 +371,8 @@ const ProjectsHub: React.FC<ProjectsHubProps> = ({
                 users={users}
                 onClick={onProjectClick}
                 variant="default"
+                isAdmin={isAdmin}
+                onDeleteProject={isAdmin ? handleDeleteProject : undefined}
               />
             ))
           )}

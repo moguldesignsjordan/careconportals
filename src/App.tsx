@@ -165,9 +165,14 @@ const App: React.FC = () => {
   const handleCreateProject = async (
     projectData: Omit<Project, 'id' | 'updates' | 'createdAt'>,
   ) => {
+    if (!user) return;
     try {
-      await createProject(projectData);
-      showToast('Project created successfully!', 'success');
+      await createProject(projectData, user.role);
+      const msg =
+        user.role === UserRole.CONTRACTOR
+          ? 'Project submitted for approval!'
+          : 'Project created successfully!';
+      showToast(msg, 'success');
       setShowCreateProject(false);
     } catch (error: any) {
       showToast(error.message || 'Failed to create project', 'error');

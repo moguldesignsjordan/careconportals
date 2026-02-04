@@ -73,8 +73,16 @@ export interface Project {
   location?: string;
   status: ProjectStatus | string; // Allow string for flexible status values
   progress: number;
+  
+  // UPDATED: Support for multiple clients and contractors
+  // Primary assignments (for backwards compatibility)
   clientId: string;
   contractorId: string;
+  
+  // NEW: Arrays for multiple assignments
+  clientIds?: string[];      // All assigned client IDs (includes primary clientId)
+  contractorIds?: string[];  // All assigned contractor IDs (includes primary contractorId)
+  
   startDate: string;
   estimatedEndDate: string;
   budget: number;
@@ -126,4 +134,11 @@ export interface CalendarEvent {
   projectId?: string;
   projectTitle?: string;
   completed?: boolean;
+}
+
+// Helper type for project team members
+export interface ProjectTeamMember {
+  user: User;
+  role: 'client' | 'contractor';
+  isPrimary: boolean;
 }

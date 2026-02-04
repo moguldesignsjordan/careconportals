@@ -89,7 +89,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             <span className="text-[11px] font-semibold text-white/60 uppercase tracking-[0.18em]">
               CAREGENCON
             </span>
-            <span className="text-sm font-semibold">Operations</span>
+            <span className="text-sm text-white font-semibold">Operations</span>
           </div>
         </div>
 

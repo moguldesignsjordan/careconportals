@@ -1,3 +1,5 @@
+// src/types.ts - UPDATED WITH FIXES
+
 export enum UserRole {
   ADMIN = 'ADMIN',
   CONTRACTOR = 'CONTRACTOR',
@@ -19,7 +21,9 @@ export interface User {
   createdAt?: string;
 }
 
+// FIXED: Added PENDING_APPROVAL status
 export enum ProjectStatus {
+  PENDING_APPROVAL = 'Pending Approval',  // ← ADDED
   PLANNING = 'Planning',
   DEMOLITION = 'Demolition',
   ROUGH_IN = 'Rough-in',
@@ -66,31 +70,28 @@ export interface Milestone {
   order?: number; // Legacy support
 }
 
+// FIXED: Added rejectionReason, contractorIds, clientIds
 export interface Project {
   id: string;
   title: string;
+  name?: string; // ← ADDED (alias for title in some contexts)
   description: string;
   location?: string;
   status: ProjectStatus | string; // Allow string for flexible status values
   progress: number;
-  
-  // UPDATED: Support for multiple clients and contractors
-  // Primary assignments (for backwards compatibility)
   clientId: string;
+  clientIds?: string[]; // ← ADDED (for multiple clients support)
   contractorId: string;
-  
-  // NEW: Arrays for multiple assignments
-  clientIds?: string[];      // All assigned client IDs (includes primary clientId)
-  contractorIds?: string[];  // All assigned contractor IDs (includes primary contractorId)
-  
+  contractorIds?: string[]; // ← ADDED (for multiple contractors support)
   startDate: string;
   estimatedEndDate: string;
   budget: number;
   spent: number;
   coverImage?: string; // Cover image for project cards
-  updates: ProjectUpdate[];
+  updates: ProjectUpdate[]; // Already exists but ensuring it's here
   milestones?: Milestone[];
   createdAt?: string;
+  rejectionReason?: string; // ← ADDED (for rejected projects)
 }
 
 export interface Message {
@@ -125,20 +126,20 @@ export interface Notification {
   category?: string;
 }
 
-// Calendar Event type for the calendar module
+// FIXED: Aligned CalendarEvent with CalendarPage.tsx expectations
 export interface CalendarEvent {
   id: string;
   title: string;
-  date: string;
-  type: 'milestone' | 'deadline' | 'start' | 'meeting';
+  description?: string; // ← ADDED
+  date: string; // ISO date string (YYYY-MM-DD)
+  startTime: string; // ← ADDED HH:MM format
+  endTime?: string; // ← ADDED
+  location?: string; // ← ADDED
+  type: 'inspection' | 'meeting' | 'delivery' | 'site-visit' | 'deadline' | 'other'; // ← UPDATED
   projectId?: string;
   projectTitle?: string;
-  completed?: boolean;
-}
-
-// Helper type for project team members
-export interface ProjectTeamMember {
-  user: User;
-  role: 'client' | 'contractor';
-  isPrimary: boolean;
+  attendeeIds: string[]; // ← ADDED (was missing)
+  createdBy: string; // ← ADDED
+  createdAt: string; // ← ADDED
+  completed?: boolean; // Keep for backward compatibility
 }

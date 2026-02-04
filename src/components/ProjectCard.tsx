@@ -1,64 +1,129 @@
 import React from 'react';
+import {
+  Calendar,
+  DollarSign,
+  FileText,
+  MapPin,
+  User as UserIcon,
+} from 'lucide-react';
 import { Project, ProjectStatus } from '../types';
-import { Calendar, DollarSign } from 'lucide-react';
 
 interface ProjectCardProps {
   project: Project;
   onClick: (project: Project) => void;
+  documentCount?: number;
+  clientName?: string;
 }
 
-const ProjectCard: React.FC<ProjectCardProps> = ({ project, onClick }) => {
-  // Handle status as string from Firebase - compare against enum values
+const ProjectCard: React.FC<ProjectCardProps> = ({
+  project,
+  onClick,
+  documentCount,
+  clientName,
+}) => {
   const getStatusColor = (status: ProjectStatus | string): string => {
     const statusStr = String(status);
-    if (statusStr === ProjectStatus.PLANNING || statusStr === 'Planning') return 'bg-blue-100 text-blue-700';
-    if (statusStr === ProjectStatus.DEMOLITION || statusStr === 'Demolition') return 'bg-red-100 text-red-700';
-    if (statusStr === ProjectStatus.ROUGH_IN || statusStr === 'Rough-in') return 'bg-purple-100 text-purple-700';
-    if (statusStr === ProjectStatus.FINISHING || statusStr === 'Finishing') return 'bg-orange-100 text-orange-700';
-    if (statusStr === ProjectStatus.COMPLETED || statusStr === 'Completed') return 'bg-green-100 text-green-700';
-    if (statusStr === ProjectStatus.ON_HOLD || statusStr === 'On Hold') return 'bg-gray-100 text-gray-700';
-    return 'bg-gray-100 text-gray-700';
+    if (statusStr === ProjectStatus.PLANNING || statusStr === 'Planning')
+      return 'bg-blue-50 text-blue-700';
+    if (statusStr === ProjectStatus.DEMOLITION || statusStr === 'Demolition')
+      return 'bg-rose-50 text-rose-700';
+    if (statusStr === ProjectStatus.ROUGH_IN || statusStr === 'Rough-in')
+      return 'bg-purple-50 text-purple-700';
+    if (statusStr === ProjectStatus.FINISHING || statusStr === 'Finishing')
+      return 'bg-indigo-50 text-indigo-700';
+    if (statusStr === ProjectStatus.COMPLETED || statusStr === 'Completed')
+      return 'bg-emerald-50 text-emerald-700';
+    if (statusStr === ProjectStatus.ON_HOLD || statusStr === 'On Hold')
+      return 'bg-amber-50 text-amber-700';
+    return 'bg-gray-50 text-gray-700';
   };
 
+  const statusClass = getStatusColor(project.status);
+  const progress = project.progress ?? 0;
+  const budget = project.budget || 0;
+
   return (
-    <div 
+    <button
       onClick={() => onClick(project)}
-      className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 hover:shadow-lg hover:border-care-orange/20 transition-all cursor-pointer group"
+      className="group flex flex-col h-full rounded-2xl border border-gray-100 bg-white p-4 text-left shadow-sm hover:shadow-md hover:border-care-orange/40 transition-all"
     >
-      <div className="flex justify-between items-start mb-4">
-        <div className="flex-1 min-w-0">
-          <h3 className="text-lg font-bold group-hover:text-care-orange transition-colors truncate">{project.title}</h3>
-          <p className="text-sm text-gray-500 mt-1 line-clamp-1">{project.description || 'No description'}</p>
-        </div>
-        <span className={`text-[10px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider ml-2 shrink-0 ${getStatusColor(project.status)}`}>
-          {project.status}
+      {/* Status / progress */}
+      <div className="flex items-start justify-between gap-2 mb-3">
+        <span
+          className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-semibold uppercase tracking-[0.18em] border ${statusClass}`}
+        >
+          <span className="h-1.5 w-1.5 rounded-full bg-current" />
+          {String(project.status || 'Planning')}
         </span>
+        <div className="text-right">
+          <p className="text-[10px] text-gray-400 uppercase tracking-[0.18em]">
+            Progress
+          </p>
+          <p className="text-xs font-bold text-gray-900">
+            {progress}%
+          </p>
+        </div>
       </div>
 
-      <div className="mb-5">
-        <div className="flex justify-between items-end mb-2">
-          <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Progress</span>
-          <span className="text-sm font-black text-care-orange">{project.progress}%</span>
+      {/* Title & meta */}
+      <div className="mb-3">
+        <h3 className="text-sm font-bold text-gray-900 group-hover:text-care-orange transition-colors line-clamp-2">
+          {project.title}
+        </h3>
+        <p className="mt-1 text-[11px] text-gray-500 flex items-center gap-1.5">
+          <MapPin size={12} className="text-care-orange" />
+          {project.location || 'No address set'}
+        </p>
+      </div>
+
+      {/* Client + budget */}
+      <div className="mb-3 flex items-center justify-between gap-3 text-[11px] text-gray-500">
+        <div className="flex items-center gap-1.5">
+          <UserIcon size={12} className="text-gray-400" />
+          <span className="truncate">
+            {clientName || 'Client'}
+          </span>
         </div>
-        <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
-          <div 
-            className="h-full bg-gradient-to-r from-care-orange to-orange-400 transition-all duration-500 rounded-full" 
-            style={{ width: `${project.progress}%` }}
+        <div className="flex items-center gap-1.5">
+          <DollarSign size={12} className="text-care-orange" />
+          <span>
+            {budget
+              ? `$${budget.toLocaleString()}`
+              : 'No budget'}
+          </span>
+        </div>
+      </div>
+
+      {/* Footer: dates, docs, progress bar */}
+      <div className="mt-auto space-y-2">
+        <div className="flex items-center justify-between text-[11px] text-gray-500">
+          <div className="flex items-center gap-1.5">
+            <Calendar size={12} className="text-gray-400" />
+            <span>
+              {project.estimatedEndDate
+                ? new Date(
+                    project.estimatedEndDate
+                  ).toLocaleDateString()
+                : 'No end date'}
+            </span>
+          </div>
+
+          {typeof documentCount === 'number' && (
+            <div className="flex items-center gap-1.5">
+              <FileText size={12} className="text-care-orange" />
+              <span>{documentCount} docs</span>
+            </div>
+          )}
+        </div>
+
+        <div className="h-1.5 rounded-full bg-gray-100 overflow-hidden">
+          <div
+            className="h-full rounded-full bg-care-orange transition-all"
+            style={{ width: `${Math.min(100, progress)}%` }}
           />
         </div>
       </div>
-
-      <div className="grid grid-cols-2 gap-3 text-xs">
-        <div className="flex items-center gap-2 text-gray-500">
-          <Calendar size={14} className="text-care-orange" />
-          <span className="font-medium">{new Date(project.estimatedEndDate).toLocaleDateString()}</span>
-        </div>
-        <div className="flex items-center gap-2 text-gray-500">
-          <DollarSign size={14} className="text-care-orange" />
-          <span className="font-medium">${(project.budget || 0).toLocaleString()}</span>
-        </div>
-      </div>
-    </div>
+    </button>
   );
 };
 

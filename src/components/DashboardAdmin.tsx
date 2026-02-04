@@ -117,14 +117,35 @@ const DashboardAdmin: React.FC<DashboardAdminProps> = ({
     }
   };
 
-  const handleAssignContractor = async (projectId: string, contractorId: string) => {
-    if (!contractorId) return;
-    try {
-      await updateProject(projectId, { contractorId });
-    } catch (e) {
-      console.error('Assign contractor failed', e);
-    }
-  };
+const handleAssignContractor = async (projectId: string, contractorId: string) => {
+  if (!contractorId) return;
+
+  try {
+    // Find the current project so we can preserve existing contractorIds
+    const project = projects.find((p) => p.id === projectId);
+
+    const existing =
+      project?.contractorIds && project.contractorIds.length > 0
+        ? project.contractorIds
+        : project?.contractorId
+        ? [project.contractorId]
+        : [];
+
+    // Add the new contractor to the list (no duplicates)
+    const updatedContractorIds = existing.includes(contractorId)
+      ? existing
+      : [...existing, contractorId];
+
+    await updateProject(projectId, {
+      contractorId: contractorId,          // primary contractor
+      contractorIds: updatedContractorIds, // full team list
+    });
+  } catch (e) {
+    console.error('Assign contractor failed', e);
+  }
+};
+
+
 
   // ── render ──
   return (

@@ -188,7 +188,8 @@ const ProjectTimeline: React.FC<ProjectTimelineProps> = ({
     setAddingMilestone(true);
     try {
       await onAddMilestone({
-        phaseId,
+        // Cast phaseId to Milestone['phaseId'] to resolve the TS2322 error
+        phaseId: phaseId as Milestone['phaseId'],
         title: newMilestone.title,
         description: newMilestone.description || '',
         date: newMilestone.date || new Date().toISOString().split('T')[0],

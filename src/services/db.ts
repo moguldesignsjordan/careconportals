@@ -729,21 +729,16 @@ export const uploadProjectDocument = async (
   });
 };
 
-export const deleteDocument = async (documentId: string, fileUrl?: string) => {
+export const deleteProjectDocument = async (
+  projectId: string,
+  docId: string
+): Promise<void> => {
   try {
-    await deleteDoc(doc(db, 'documents', documentId));
-    
-    if (fileUrl) {
-      try {
-        const storageRef = ref(storage, fileUrl);
-        await deleteObject(storageRef);
-      } catch (e) {
-        console.warn("Could not delete file from storage:", e);
-      }
-    }
-  } catch (error) {
-    console.error("Error deleting document:", error);
-    throw error;
+    const docRef = doc(db, 'documents', docId);
+    await deleteDoc(docRef);
+  } catch (err) {
+    console.error('Error deleting project document', err);
+    throw err;
   }
 };
 

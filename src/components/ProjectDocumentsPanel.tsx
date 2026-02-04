@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { Paperclip, Upload, Trash2, FileText } from 'lucide-react';
-import { Project, User, Document as ProjectDocument } from '../types';
+import { Paperclip, Trash2, UploadCloud } from 'lucide-react';
+import { Project, User, Document as ProjectDocument, UserRole } from '../types';
+
 import {
   subscribeToProjectDocuments,
   uploadProjectDocument,
-  deleteDocument,
+  deleteProjectDocument,
 } from '../services/db';
 
 interface ProjectDocumentsPanelProps {
@@ -21,98 +22,133 @@ const ProjectDocumentsPanel: React.FC<ProjectDocumentsPanelProps> = ({
 
   useEffect(() => {
     if (!project?.id) return;
-    const unsub = subscribeToProjectDocuments(project.id, setDocs);
-    return () => unsub();
+
+    const unsubscribe = subscribeToProjectDocuments(project.id, (list) => {
+      setDocs(
+        list
+          .slice()
+          .sort(
+            (a, b) =>
+              new Date(b.uploadedAt).getTime() -
+              new Date(a.uploadedAt).getTime()
+          )
+      );
+    });
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
   }, [project?.id]);
 
   const handleFileChange = async (
     e: React.ChangeEvent<HTMLInputElement>
   ) => {
     const file = e.target.files?.[0];
-    if (!file) return;
+    if (!file || !project?.id) return;
 
+    setUploading(true);
     try {
-      setUploading(true);
-      await uploadProjectDocument(file, project, currentUser);
+      await uploadProjectDocument(project.id, file, currentUser);
     } catch (err) {
-      console.error('Error uploading document:', err);
+      console.error('Failed to upload document', err);
+      alert('Could not upload document. Please try again.');
     } finally {
       setUploading(false);
-      e.target.value = ''; // reset input
+      e.target.value = '';
     }
   };
 
-  const handleDelete = async (doc: ProjectDocument) => {
+  const handleDelete = async (docId: string) => {
+    if (!project?.id) return;
+
+    const confirmDelete = window.confirm(
+      'Are you sure you want to delete this document? This action cannot be undone.'
+    );
+
+    if (!confirmDelete) return;
+
     try {
-      await deleteDocument(doc.id, doc.fileUrl);
+      await deleteProjectDocument(project.id, docId);
     } catch (err) {
-      console.error('Error deleting document:', err);
+      console.error('Failed to delete document', err);
+      alert('Could not delete document. Please try again.');
+    }
+  };
+
+  const canUploadOrDelete = !!currentUser; // rules handle real security
+
+  const formatDate = (value?: string) => {
+    if (!value) return '';
+    try {
+      return new Date(value).toLocaleDateString();
+    } catch {
+      return value;
     }
   };
 
   return (
-    <div className="bg-white border border-gray-100 rounded-2xl p-4 mt-4">
-      <div className="flex items-center justify-between mb-3">
+    <div className="bg-white border border-gray-100 rounded-2xl p-4">
+      <div className="flex items-center justify-between gap-2 mb-3">
         <div className="flex items-center gap-2">
-          <Paperclip size={16} className="text-care-orange" />
-          <h3 className="text-xs font-black uppercase tracking-[0.18em] text-gray-700">
+          <Paperclip size={18} className="text-care-orange" />
+          <p className="text-[11px] text-gray-400 uppercase tracking-[0.18em]">
             Project Documents
-          </h3>
+          </p>
         </div>
 
-        <label className="inline-flex items-center gap-2 px-3 py-1.5 bg-gray-900 text-white text-xs font-black rounded-lg cursor-pointer hover:bg-black transition">
-          <Upload size={14} />
-          {uploading ? 'Uploading…' : 'Upload'}
-          <input
-            type="file"
-            className="hidden"
-            disabled={uploading}
-            onChange={handleFileChange}
-          />
-        </label>
+        {canUploadOrDelete && (
+          <label className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-[11px] font-semibold cursor-pointer bg-gray-50 border border-gray-200 hover:bg-white hover:border-care-orange/60 transition-colors">
+            <UploadCloud size={14} className="text-care-orange" />
+            {uploading ? 'Uploading…' : 'Upload'}
+            <input
+              type="file"
+              className="hidden"
+              onChange={handleFileChange}
+              disabled={uploading}
+            />
+          </label>
+        )}
       </div>
 
       {docs.length === 0 ? (
         <p className="text-xs text-gray-500">
-          No documents yet. Upload plans, permits, or photos here.
+          No documents uploaded yet. {canUploadOrDelete && 'Upload plans, photos, or contracts here.'}
         </p>
       ) : (
-        <ul className="space-y-2 text-xs">
+        <ul className="space-y-2 max-h-64 overflow-y-auto pr-1">
           {docs.map((doc) => (
             <li
               key={doc.id}
-              className="flex items-center justify-between gap-2 border border-gray-100 rounded-lg px-3 py-2"
+              className="flex items-center justify-between gap-2 rounded-xl border border-gray-100 px-3 py-2 text-xs"
             >
               <div className="flex items-center gap-2 min-w-0">
-                <FileText size={14} className="text-care-orange shrink-0" />
+                <div className="w-7 h-7 rounded-full bg-gray-100 flex items-center justify-center">
+                  <Paperclip size={14} className="text-care-orange" />
+                </div>
                 <div className="min-w-0">
-                  <p className="font-semibold text-gray-800 truncate">
-                    {doc.title || doc.fileName || 'Untitled document'}
-                  </p>
-                  <p className="text-[11px] text-gray-400 truncate">
-                    {doc.uploadedBy || 'Unknown'} ·{' '}
-                    {doc.uploadedAt ? doc.uploadedAt.slice(0, 10) : ''}
+                  <a
+                    href={doc.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="block truncate font-semibold text-gray-800 hover:text-care-orange"
+                  >
+                    {doc.name}
+                  </a>
+                  <p className="text-[10px] text-gray-500">
+                    {doc.uploadedByName || 'Unknown'} · {formatDate(doc.uploadedAt)}
                   </p>
                 </div>
               </div>
-              <div className="flex items-center gap-2 shrink-0">
-                {doc.fileUrl && (
-                  <a
-                    href={doc.fileUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-[11px] text-care-orange font-semibold hover:underline"
-                  >
-                    View
-                  </a>
-                )}
+
+              {canUploadOrDelete && (
                 <button
-                  onClick={() => handleDelete(doc)}
-                  className="p-1.5 rounded-md text-gray-300 hover:text-red-500 hover:bg-red-50 transition"
+                  type="button"
+                  onClick={() => handleDelete(doc.id)}
+                  className="flex-shrink-0 p-1.5 rounded-lg hover:bg-red-50 transition-colors"
                 >
-                  <Trash2 size={14} />
+                  <Trash2 size={14} className="text-red-500" />
                 </button>
-              </div>
+              )}
             </li>
           ))}
         </ul>

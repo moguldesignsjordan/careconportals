@@ -260,8 +260,7 @@ const ProjectDetails: React.FC<ProjectDetailsProps> = ({
   onMessage,
 }) => {
   const canEditCore =
-    currentUser.role === UserRole.ADMIN ||
-    currentUser.role === UserRole.CONTRACTOR;
+    currentUser.role === UserRole.ADMIN;
 
   const [savingDetails, setSavingDetails] = useState(false);
   const [updateText, setUpdateText] = useState('');

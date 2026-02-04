@@ -208,7 +208,7 @@ const ProjectTimeline: React.FC<ProjectTimelineProps> = ({
     setAddingMilestone(true);
     try {
       await onAddMilestone({
-        phaseId,
+        phaseId: phaseId as PhaseId,
         title: newMilestone.title.trim(),
         description: newMilestone.description.trim(),
         date: newMilestone.date,
@@ -252,7 +252,7 @@ const ProjectTimeline: React.FC<ProjectTimelineProps> = ({
     setDescDraft('');
   };
 
-  const handleTitleKeyDown = (e: React.KeyboardEvent, milestone: Milestone) => {
+  const handleTitleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>, milestone: Milestone) => {
     if (e.key === 'Enter') {
       e.currentTarget.blur();
     } else if (e.key === 'Escape') {
@@ -261,7 +261,7 @@ const ProjectTimeline: React.FC<ProjectTimelineProps> = ({
     }
   };
 
-  const handleDescriptionKeyDown = (e: React.KeyboardEvent, milestone: Milestone) => {
+  const handleDescriptionKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>, milestone: Milestone) => {
     if (e.key === 'Enter' && e.metaKey) {
       commitDescriptionEdit(milestone);
     } else if (e.key === 'Escape') {
@@ -348,7 +348,7 @@ const ProjectTimeline: React.FC<ProjectTimelineProps> = ({
             {'address' in project && project.address && (
               <p className="mt-1.5 flex items-center gap-1.5 text-sm text-white/80">
                 <MapPin size={14} />
-                <span className="line-clamp-1">{project.address}</span>
+                <span className="line-clamp-1">{(project as any).address as string}</span>
               </p>
             )}
           </div>

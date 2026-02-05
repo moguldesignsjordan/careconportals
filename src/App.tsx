@@ -578,6 +578,7 @@ const App: React.FC = () => {
             currentUser={user}
             users={users}
             messages={messages}
+            projects={projects}
             onSendMessage={handleSendMessage}
             initialChatUser={chatUser}
           />

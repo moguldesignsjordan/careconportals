@@ -7,12 +7,13 @@ import {
   AtSign,
   Tag,
 } from 'lucide-react';
-import { User, Message } from '../types';
+import { User, Message, Project, UserRole } from '../types';
 
 interface MessagingProps {
   currentUser: User;
   users: User[];
   messages: Message[];
+  projects: Project[]; // Added: needed to filter contacts by shared projects
   onSendMessage: (receiverId: string, content: string, projectId?: string) => Promise<void>;
   initialChatUser?: User | null;
   activeProjectId?: string | null; // when opened from a project
@@ -22,6 +23,7 @@ const Messaging: React.FC<MessagingProps> = ({
   currentUser,
   users,
   messages,
+  projects,
   onSendMessage,
   initialChatUser,
   activeProjectId,
@@ -38,10 +40,65 @@ const Messaging: React.FC<MessagingProps> = ({
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
-  const otherUsers = useMemo(
-    () => users.filter((u) => u.id !== currentUser.id),
-    [users, currentUser.id]
-  );
+  /**
+   * Filter users based on shared projects:
+   * - ADMIN: Can see all users (clients + contractors)
+   * - CLIENT: Can only see contractors who share at least one project
+   * - CONTRACTOR: Can only see clients who share at least one project
+   */
+  const allowedContacts = useMemo(() => {
+    const otherUsers = users.filter((u) => u.id !== currentUser.id);
+
+    // Admins can message anyone
+    if (currentUser.role === UserRole.ADMIN) {
+      return otherUsers;
+    }
+
+    // For clients: find all projects they're on, then get contractors from those projects
+    if (currentUser.role === UserRole.CLIENT) {
+      // Get all projects where current user is a client
+      const userProjects = projects.filter((p) => {
+        const clientIds = p.clientIds?.length ? p.clientIds : p.clientId ? [p.clientId] : [];
+        return clientIds.includes(currentUser.id);
+      });
+
+      // Collect all contractor IDs from those projects
+      const allowedContractorIds = new Set<string>();
+      userProjects.forEach((p) => {
+        const contractorIds = p.contractorIds?.length ? p.contractorIds : p.contractorId ? [p.contractorId] : [];
+        contractorIds.forEach((id) => allowedContractorIds.add(id));
+      });
+
+      // Return only contractors who are in the allowed set
+      return otherUsers.filter(
+        (u) => u.role === UserRole.CONTRACTOR && allowedContractorIds.has(u.id)
+      );
+    }
+
+    // For contractors: find all projects they're on, then get clients from those projects
+    if (currentUser.role === UserRole.CONTRACTOR) {
+      // Get all projects where current user is a contractor
+      const userProjects = projects.filter((p) => {
+        const contractorIds = p.contractorIds?.length ? p.contractorIds : p.contractorId ? [p.contractorId] : [];
+        return contractorIds.includes(currentUser.id);
+      });
+
+      // Collect all client IDs from those projects
+      const allowedClientIds = new Set<string>();
+      userProjects.forEach((p) => {
+        const clientIds = p.clientIds?.length ? p.clientIds : p.clientId ? [p.clientId] : [];
+        clientIds.forEach((id) => allowedClientIds.add(id));
+      });
+
+      // Return only clients who are in the allowed set
+      return otherUsers.filter(
+        (u) => u.role === UserRole.CLIENT && allowedClientIds.has(u.id)
+      );
+    }
+
+    // Fallback: no contacts
+    return [];
+  }, [users, currentUser, projects]);
 
   // Group messages by contact to compute last message
   const contactsWithMeta = useMemo(() => {
@@ -59,7 +116,7 @@ const Messaging: React.FC<MessagingProps> = ({
       map.get(otherId)!.push(m);
     });
 
-    return otherUsers
+    return allowedContacts
       .map((user) => {
         const msgs = map.get(user.id) || [];
         const last = msgs[msgs.length - 1];
@@ -67,13 +124,13 @@ const Messaging: React.FC<MessagingProps> = ({
       })
       .sort((a, b) => {
         if (a.lastMessage && b.lastMessage) {
-          return a.lastMessage.timestamp.localeCompare(b.lastMessage.timestamp);
+          return b.lastMessage.timestamp.localeCompare(a.lastMessage.timestamp); // Most recent first
         }
         if (a.lastMessage) return -1;
         if (b.lastMessage) return 1;
         return a.user.name.localeCompare(b.user.name);
       });
-  }, [messages, currentUser.id, otherUsers]);
+  }, [messages, currentUser.id, allowedContacts]);
 
   // Filter contacts by search
   const filteredContacts = useMemo(() => {
@@ -146,18 +203,18 @@ const Messaging: React.FC<MessagingProps> = ({
     updateMentionQuery(value);
   };
 
+  // Mention suggestions limited to allowed contacts only
   const mentionSuggestions = useMemo(() => {
     if (!mentionQuery) return [];
     const q = mentionQuery.toLowerCase();
-    return users
-      .filter((u) => u.id !== currentUser.id)
+    return allowedContacts
       .filter(
         (u) =>
           u.name.toLowerCase().includes(q) ||
           u.email.toLowerCase().includes(q)
       )
       .slice(0, 5);
-  }, [mentionQuery, users, currentUser.id]);
+  }, [mentionQuery, allowedContacts]);
 
   const handleSelectMention = (user: User) => {
     const value = inputText;
@@ -206,6 +263,20 @@ const Messaging: React.FC<MessagingProps> = ({
     }
   };
 
+  // Helper to get role badge color
+  const getRoleBadge = (role: UserRole) => {
+    switch (role) {
+      case UserRole.CLIENT:
+        return { bg: 'bg-blue-100', text: 'text-blue-700', label: 'Client' };
+      case UserRole.CONTRACTOR:
+        return { bg: 'bg-amber-100', text: 'text-amber-700', label: 'Contractor' };
+      case UserRole.ADMIN:
+        return { bg: 'bg-purple-100', text: 'text-purple-700', label: 'Admin' };
+      default:
+        return { bg: 'bg-gray-100', text: 'text-gray-700', label: 'User' };
+    }
+  };
+
   return (
     <div className="h-full flex flex-col md:flex-row bg-white rounded-2xl border border-gray-100 overflow-hidden">
       {/* CONTACTS PANEL */}
@@ -241,42 +312,52 @@ const Messaging: React.FC<MessagingProps> = ({
         <div className="flex-1 overflow-y-auto">
           {filteredContacts.length === 0 && (
             <div className="p-6 text-xs text-gray-400 text-center">
-              No contacts found.
+              {currentUser.role === UserRole.ADMIN
+                ? 'No contacts found.'
+                : 'No contacts found. You can only message users who share a project with you.'}
             </div>
           )}
 
-          {filteredContacts.map(({ user, lastMessage }) => (
-            <button
-              key={user.id}
-              onClick={() => {
-                setActiveChat(user);
-                setShowContacts(false);
-              }}
-              className={`w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-gray-50 transition-colors ${
-                activeChat?.id === user.id ? 'bg-care-orange/5' : ''
-              }`}
-            >
-              <div className="h-9 w-9 rounded-xl bg-gray-100 flex items-center justify-center text-xs font-semibold text-gray-700">
-                {user.name.charAt(0).toUpperCase()}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-xs font-semibold text-gray-900 truncate">
-                  {user.name}
-                </p>
+          {filteredContacts.map(({ user, lastMessage }) => {
+            const roleBadge = getRoleBadge(user.role);
+            return (
+              <button
+                key={user.id}
+                onClick={() => {
+                  setActiveChat(user);
+                  setShowContacts(false);
+                }}
+                className={`w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-gray-50 transition-colors ${
+                  activeChat?.id === user.id ? 'bg-care-orange/5' : ''
+                }`}
+              >
+                <div className="h-9 w-9 rounded-xl bg-gray-100 flex items-center justify-center text-xs font-semibold text-gray-700">
+                  {user.name.charAt(0).toUpperCase()}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <p className="text-xs font-semibold text-gray-900 truncate">
+                      {user.name}
+                    </p>
+                    <span className={`text-[9px] px-1.5 py-0.5 rounded-full ${roleBadge.bg} ${roleBadge.text}`}>
+                      {roleBadge.label}
+                    </span>
+                  </div>
+                  {lastMessage && (
+                    <p className="text-[11px] text-gray-500 truncate">
+                      {lastMessage.senderId === currentUser.id ? 'You: ' : ''}
+                      {lastMessage.content}
+                    </p>
+                  )}
+                </div>
                 {lastMessage && (
-                  <p className="text-[11px] text-gray-500 truncate">
-                    {lastMessage.senderId === currentUser.id ? 'You: ' : ''}
-                    {lastMessage.content}
-                  </p>
+                  <span className="text-[10px] text-gray-400 ml-2">
+                    {formatTime(lastMessage.timestamp)}
+                  </span>
                 )}
-              </div>
-              {lastMessage && (
-                <span className="text-[10px] text-gray-400 ml-2">
-                  {formatTime(lastMessage.timestamp)}
-                </span>
-              )}
-            </button>
-          ))}
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -413,7 +494,9 @@ const Messaging: React.FC<MessagingProps> = ({
               <MessageSquare size={48} className="mx-auto mb-4 opacity-40" />
               <p className="text-sm font-bold text-gray-700">Select a conversation</p>
               <p className="text-xs text-gray-400">
-                Choose a contact from the left to start messaging.
+                {currentUser.role === UserRole.ADMIN
+                  ? 'Choose a contact from the left to start messaging.'
+                  : 'Choose a contact from your shared projects to start messaging.'}
               </p>
             </div>
           </div>

@@ -1,7 +1,6 @@
 import React from 'react';
 import { Project, User, ProjectStatus } from '../types';
 import {
-  MapPin,
   Hammer,
   Calendar,
   TrendingUp,
@@ -12,6 +11,7 @@ import {
   MessageSquare,
   Hourglass,
   AlertCircle,
+  Users as UsersIcon,
 } from 'lucide-react';
 import ProjectCard from './ProjectCard';
 
@@ -25,14 +25,18 @@ interface DashboardContractorProps {
 }
 
 const DashboardContractor: React.FC<DashboardContractorProps> = ({
-  projects,
-  users,
+  projects = [],
+  users = [],
   currentUser,
   onSelectProject,
   onOpenCreateModal,
   onOpenMessages,
 }) => {
-  const myProjects = projects.filter(
+  // Safety check: Ensure projects and users are arrays
+  const safeProjects = Array.isArray(projects) ? projects : [];
+  const safeUsers = Array.isArray(users) ? users : [];
+  
+  const myProjects = safeProjects.filter(
     (p) => p.contractorId === currentUser.id
   );
 
@@ -70,6 +74,15 @@ const DashboardContractor: React.FC<DashboardContractorProps> = ({
             myProjects.length
         )
       : 0;
+
+  // Get team members for a project
+  const getProjectTeam = (project: Project) => {
+    const client = safeUsers.find((u) => u.id === project.clientId);
+    const contractors = safeUsers.filter((u) => 
+      project.contractorIds?.includes(u.id) || u.id === project.contractorId
+    );
+    return { client, contractors };
+  };
 
   return (
     <div className="space-y-8">
@@ -121,7 +134,7 @@ const DashboardContractor: React.FC<DashboardContractorProps> = ({
           </div>
         </div>
 
-        {/* ── Pending Approval (new) ── */}
+        {/* Pending Approval */}
         <div className={`rounded-2xl p-4 flex items-center gap-3 border ${pendingCount > 0 ? 'bg-violet-50 border-violet-200' : 'bg-white border-gray-100'}`}>
           <div className={`h-10 w-10 rounded-xl flex items-center justify-center ${pendingCount > 0 ? 'bg-violet-100' : 'bg-violet-50'}`}>
             <Hourglass size={18} className="text-violet-600" />
@@ -196,12 +209,12 @@ const DashboardContractor: React.FC<DashboardContractorProps> = ({
           </div>
         </div>
 
-        {/* Rejection feedback banner – shown once per rejected project */}
+        {/* Rejection feedback banner */}
         {rejectedProjects.map((p) => (
           <div key={p.id} className="flex items-start gap-3 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
             <AlertCircle size={18} className="text-red-500 mt-0.5 shrink-0" />
             <div className="text-xs">
-              <p className="font-black text-red-700">{p.name} – approval declined</p>
+              <p className="font-black text-red-700">{p.name} — approval declined</p>
               <p className="text-red-600 mt-0.5">{p.rejectionReason}</p>
             </div>
           </div>
@@ -213,13 +226,78 @@ const DashboardContractor: React.FC<DashboardContractorProps> = ({
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-            {myProjects.map((project) => (
-              <ProjectCard
-                key={project.id}
-                project={project}
-                onClick={() => onSelectProject(project)}
-              />
-            ))}
+            {myProjects.map((project) => {
+              const { client, contractors } = getProjectTeam(project);
+              
+              return (
+                <div key={project.id} className="bg-white border border-gray-100 rounded-2xl overflow-hidden hover:border-gray-200 transition-all">
+                  {/* Original Project Card */}
+                  <div onClick={() => onSelectProject(project)} className="cursor-pointer">
+                    <ProjectCard
+                      project={project}
+                      onClick={() => {}}
+                    />
+                  </div>
+                  
+                  {/* Team Members Section */}
+                  {safeUsers.length > 0 && (
+                    <div className="border-t border-gray-100 px-4 py-3 bg-gray-50">
+                      <div className="flex items-center gap-2 mb-2">
+                        <UsersIcon size={14} className="text-gray-400" />
+                        <p className="text-[10px] text-gray-400 uppercase tracking-[0.18em] font-bold">
+                          Project Team
+                        </p>
+                      </div>
+                      
+                      <div className="space-y-2">
+                        {/* Client */}
+                        {client && (
+                          <div className="flex items-center gap-2">
+                            <div className="w-6 h-6 rounded-full bg-gray-200 flex items-center justify-center text-[10px] font-bold text-gray-700">
+                              {client.name?.charAt(0) || 'C'}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-semibold text-gray-900 truncate">
+                                {client.name}
+                              </p>
+                              <p className="text-[10px] text-gray-500">Client</p>
+                            </div>
+                          </div>
+                        )}
+                        
+                        {/* Contractors */}
+                        {contractors.length > 0 && (
+                          <div className="flex items-center gap-1 flex-wrap">
+                            {contractors.slice(0, 3).map((contractor) => (
+                              <div
+                                key={contractor.id}
+                                className="flex items-center gap-1.5 bg-white rounded-full px-2 py-1 border border-gray-200"
+                              >
+                                <div className="w-5 h-5 rounded-full bg-gray-200 flex items-center justify-center text-[9px] font-bold text-gray-700">
+                                  {contractor.name?.charAt(0) || 'C'}
+                                </div>
+                                <span className="text-[10px] font-medium text-gray-700">
+                                  {contractor.name?.split(' ')[0]}
+                                </span>
+                              </div>
+                            ))}
+                            {contractors.length > 3 && (
+                              <div className="flex items-center justify-center w-6 h-6 rounded-full bg-gray-100 text-[10px] font-bold text-gray-600">
+                                +{contractors.length - 3}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        
+                        {!client && contractors.length === 0 && (
+                          <p className="text-[10px] text-gray-400 italic">No team assigned</p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </section>

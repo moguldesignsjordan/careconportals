@@ -250,9 +250,9 @@ const LoginPage: React.FC = () => {
               <img src="/care.png" alt="CareCon" className="h-8" />
               <div className="flex flex-col leading-tight">
                 <span className="text-[11px] font-semibold text-white/60 uppercase tracking-[0.18em]">
-                  CareCon
+                  CAREGENCON
                 </span>
-                <span className="text-sm font-semibold">Construction Ops Portal</span>
+                <span className="text-sm font-semibold">Operations</span>
               </div>
             </div>
 
@@ -297,7 +297,7 @@ const LoginPage: React.FC = () => {
                 {mode === 'login' ? 'Welcome back' : 'Create your portal access'}
               </p>
               <h2 className="text-xl font-black text-[#1A1A1A]">
-                {mode === 'login' ? 'Sign in to CareCon' : 'Join the CareCon portal'}
+                {mode === 'login' ? 'Sign in to CAREGENCON' : 'Join the CareGenCon portal'}
               </h2>
             </div>
             <img src="/care.png" alt="CareCon" className="h-7 w-auto" />

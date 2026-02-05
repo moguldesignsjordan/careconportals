@@ -145,6 +145,34 @@ const handleAssignContractor = async (projectId: string, contractorId: string) =
   }
 };
 
+const handleAssignClient = async (projectId: string, clientId: string) => {
+  if (!clientId) return;
+
+  try {
+    // Find the current project so we can preserve existing clientIds
+    const project = projects.find((p) => p.id === projectId);
+
+    const existing =
+      project?.clientIds && project.clientIds.length > 0
+        ? project.clientIds
+        : project?.clientId
+        ? [project.clientId]
+        : [];
+
+    // Add the new client to the list (no duplicates)
+    const updatedClientIds = existing.includes(clientId)
+      ? existing
+      : [...existing, clientId];
+
+    await updateProject(projectId, {
+      clientId: clientId,          // primary client
+      clientIds: updatedClientIds, // full client list
+    });
+  } catch (e) {
+    console.error('Assign client failed', e);
+  }
+};
+
 
 
   // ── render ──
@@ -475,15 +503,15 @@ const handleAssignContractor = async (projectId: string, contractorId: string) =
                     </div>
 
                     <div className="mb-3">
-                      <label className="text-[10px] font-black text-gray-400 uppercase tracking-[0.14em]">Contractor</label>
+                      <label className="text-[10px] font-black text-gray-400 uppercase tracking-[0.14em]">Client</label>
                       <select
-                        value={project.contractorId || ''}
-                        onChange={(e) => handleAssignContractor(project.id, e.target.value)}
+                        value={project.clientId || ''}
+                        onChange={(e) => handleAssignClient(project.id, e.target.value)}
                         onClick={(e) => e.stopPropagation()}
                         className="w-full mt-0.5 text-xs font-semibold text-gray-700 bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1.5 appearance-none cursor-pointer focus:border-care-orange focus:ring-0 transition-colors"
                       >
-                        <option value="">— Unassigned —</option>
-                        {contractors.map((c) => (
+                        <option value="">— No Client —</option>
+                        {clients.map((c) => (
                           <option key={c.id} value={c.id}>{c.name}</option>
                         ))}
                       </select>

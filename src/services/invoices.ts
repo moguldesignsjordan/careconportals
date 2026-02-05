@@ -1,552 +1,429 @@
 // src/services/invoices.ts
-// Invoice management service - Firestore operations + Square API calls
-
-import { 
-  collection, 
-  onSnapshot, 
-  query, 
-  where, 
-  addDoc, 
-  updateDoc, 
+import {
+  collection,
+  onSnapshot,
+  query,
+  where,
+  addDoc,
+  updateDoc,
   deleteDoc,
-  doc, 
+  doc,
   orderBy,
   getDoc,
   getDocs,
-  Timestamp,
-  writeBatch,
 } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { db, functions } from '../lib/firebase';
-import { 
-  Invoice, 
-  InvoiceStatus, 
-  InvoicePayment,
-  PaymentMethod,
-  CreateInvoiceData,
-  InvoiceLineItem,
-} from '../types';
-import { User, UserRole } from '../types';
+import { Invoice, InvoiceStatus, CreateInvoiceInput, UpdateInvoiceInput } from '../types/invoice';
+import { UserRole } from '../types';
 
-// ============ INVOICE NUMBER GENERATION ============
-
-/**
- * Generate next invoice number (INV-0001, INV-0002, etc.)
- */
-export const generateInvoiceNumber = async (): Promise<string> => {
-  const invoicesRef = collection(db, 'invoices');
-  const q = query(invoicesRef, orderBy('createdAt', 'desc'));
-  const snapshot = await getDocs(q);
-  
-  let maxNumber = 0;
-  snapshot.docs.forEach(doc => {
-    const data = doc.data();
-    if (data.invoiceNumber) {
-      const match = data.invoiceNumber.match(/INV-(\d+)/);
-      if (match) {
-        const num = parseInt(match[1], 10);
-        if (num > maxNumber) maxNumber = num;
-      }
-    }
-  });
-  
-  const nextNumber = maxNumber + 1;
-  return `INV-${nextNumber.toString().padStart(4, '0')}`;
-};
-
-// ============ SUBSCRIBE TO INVOICES ============
+// ============ INVOICE SUBSCRIPTIONS ============
 
 /**
  * Subscribe to invoices based on user role
  * - ADMIN: sees all invoices
- * - CLIENT: sees invoices where they are the recipient
  * - CONTRACTOR: sees invoices for projects they're assigned to
+ * - CLIENT: sees invoices addressed to them
  */
 export const subscribeToInvoices = (
-  user: User, 
+  userId: string,
+  userRole: UserRole,
   callback: (invoices: Invoice[]) => void
 ) => {
   let q;
-  
-  if (user.role === UserRole.ADMIN) {
+
+  if (userRole === UserRole.ADMIN) {
     // Admin sees all invoices
     q = query(collection(db, 'invoices'), orderBy('createdAt', 'desc'));
-  } else if (user.role === UserRole.CLIENT) {
-    // Client sees their invoices
+  } else if (userRole === UserRole.CLIENT) {
+    // Client sees invoices where they are the recipient
     q = query(
-      collection(db, 'invoices'), 
-      where('clientIds', 'array-contains', user.id),
+      collection(db, 'invoices'),
+      where('clientId', '==', userId),
       orderBy('createdAt', 'desc')
     );
   } else {
-    // Contractors see invoices for their projects (read-only)
-    // This requires a composite index on projectId + createdAt
+    // Contractor sees invoices they created
     q = query(
       collection(db, 'invoices'),
+      where('createdBy', '==', userId),
       orderBy('createdAt', 'desc')
     );
   }
 
-  return onSnapshot(q, (snapshot) => {
-    let invoices = snapshot.docs.map(doc => ({ 
-      id: doc.id, 
-      ...doc.data() 
-    } as Invoice));
-    
-    // For contractors, filter to only their projects client-side
-    // (Firestore can't do complex queries across arrays)
-    if (user.role === UserRole.CONTRACTOR) {
-      // This would need access to the user's project IDs
-      // For now, contractors don't see invoices
-      invoices = [];
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const invoices = snapshot.docs.map(
+        (doc) =>
+          ({
+            id: doc.id,
+            ...doc.data(),
+          } as Invoice)
+      );
+      callback(invoices);
+    },
+    (error) => {
+      console.error('Error fetching invoices:', error);
+      callback([]);
     }
-    
-    callback(invoices);
-  }, (error) => {
-    console.error("Error fetching invoices:", error);
-    callback([]);
-  });
+  );
 };
 
+// ============ INVOICE CRUD ============
+
 /**
- * Subscribe to invoices for a specific project
+ * Generate the next invoice number
  */
-export const subscribeToProjectInvoices = (
-  projectId: string,
-  callback: (invoices: Invoice[]) => void
-) => {
+const generateInvoiceNumber = async (): Promise<string> => {
+  const year = new Date().getFullYear();
+  const prefix = `INV-${year}-`;
+  
+  // Get the count of invoices this year
   const q = query(
     collection(db, 'invoices'),
-    where('projectId', '==', projectId),
-    orderBy('createdAt', 'desc')
+    where('invoiceNumber', '>=', prefix),
+    where('invoiceNumber', '<', prefix + '\uf8ff')
   );
-
-  return onSnapshot(q, (snapshot) => {
-    const invoices = snapshot.docs.map(doc => ({ 
-      id: doc.id, 
-      ...doc.data() 
-    } as Invoice));
-    callback(invoices);
-  }, (error) => {
-    console.error("Error fetching project invoices:", error);
-    callback([]);
-  });
-};
-
-// ============ CREATE INVOICE ============
-
-/**
- * Calculate invoice totals from line items
- */
-const calculateInvoiceTotals = (
-  lineItems: InvoiceLineItem[],
-  taxRate: number = 0,
-  discountAmount: number = 0
-) => {
-  const subtotal = lineItems.reduce((sum, item) => sum + item.totalPrice, 0);
-  const taxAmount = Math.round(subtotal * taxRate);
-  const totalAmount = subtotal + taxAmount - discountAmount;
   
-  return {
-    subtotal,
-    taxAmount,
-    totalAmount,
-    amountDue: totalAmount,
-    amountPaid: 0,
-  };
+  const snapshot = await getDocs(q);
+  const nextNum = snapshot.size + 1;
+  
+  return `${prefix}${nextNum.toString().padStart(4, '0')}`;
 };
 
 /**
- * Create a new invoice (local only - doesn't create in Square yet)
- * Call publishInvoice to send to Square and customer
+ * Create a new invoice
  */
 export const createInvoice = async (
-  data: CreateInvoiceData,
-  createdBy: string,
-  projectTitle?: string
-): Promise<string> => {
+  invoiceData: CreateInvoiceInput
+): Promise<Invoice> => {
   try {
     const invoiceNumber = await generateInvoiceNumber();
-    
-    // Generate IDs for line items and calculate totals
-    const lineItems: InvoiceLineItem[] = data.lineItems.map((item, index) => ({
-      id: `item-${Date.now()}-${index}`,
-      description: item.description,
-      quantity: item.quantity,
-      unitPrice: item.unitPrice,
-      totalPrice: item.quantity * item.unitPrice,
-      milestoneId: item.milestoneId,
-    }));
-    
-    const totals = calculateInvoiceTotals(
-      lineItems,
-      data.taxRate || 0,
-      data.discountAmount || 0
-    );
-    
-    const invoice: Omit<Invoice, 'id'> = {
+    const now = new Date().toISOString();
+
+    const newInvoice = {
+      ...invoiceData,
       invoiceNumber,
-      title: data.title,
-      description: data.description,
-      projectId: data.projectId,
-      projectTitle: projectTitle,
-      clientId: data.clientId,
-      clientIds: [data.clientId],
-      lineItems,
-      ...totals,
-      taxRate: data.taxRate || 0,
-      discountAmount: data.discountAmount || 0,
-      acceptedPaymentMethods: data.acceptedPaymentMethods || {
-        card: true,
-        bankAccount: false,
-        squareGiftCard: false,
-        cashAppPay: true,
-      },
-      allowPartialPayments: data.allowPartialPayments,
-      autoPayEnabled: data.autoPayEnabled,
-      cardOnFileId: data.cardOnFileId,
-      issueDate: new Date().toISOString().split('T')[0],
-      dueDate: data.dueDate,
-      scheduledSendDate: data.scheduledSendDate,
       payments: [],
-      status: InvoiceStatus.DRAFT,
-      remindersSent: 0,
-      createdBy,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      internalNotes: data.internalNotes,
-      customerNotes: data.customerNotes,
+      amountPaid: 0,
+      amountDue: invoiceData.total,
+      createdAt: now,
+      updatedAt: now,
     };
-    
-    const docRef = await addDoc(collection(db, 'invoices'), invoice);
-    return docRef.id;
+
+    const docRef = await addDoc(collection(db, 'invoices'), newInvoice);
+
+    return {
+      id: docRef.id,
+      ...newInvoice,
+    } as Invoice;
   } catch (error) {
-    console.error("Error creating invoice:", error);
+    console.error('Error creating invoice:', error);
     throw error;
   }
 };
 
-// ============ PUBLISH INVOICE (SEND TO SQUARE) ============
-
 /**
- * Publish invoice - creates order in Square, creates invoice, sends to customer
- * This calls a Firebase Cloud Function that handles the Square API securely
- */
-export const publishInvoice = async (invoiceId: string): Promise<void> => {
-  try {
-    const publishInvoiceFn = httpsCallable(functions, 'publishInvoice');
-    const result = await publishInvoiceFn({ invoiceId });
-    
-    // The cloud function updates the invoice document with Square IDs
-    console.log('Invoice published:', result.data);
-  } catch (error: any) {
-    console.error("Error publishing invoice:", error);
-    throw new Error(error.message || 'Failed to publish invoice');
-  }
-};
-
-// ============ UPDATE INVOICE ============
-
-/**
- * Update a draft invoice (can't update published invoices)
+ * Update an existing invoice
  */
 export const updateInvoice = async (
   invoiceId: string,
-  updates: Partial<CreateInvoiceData>
+  updates: UpdateInvoiceInput
+): Promise<void> => {
+  try {
+    const invoiceRef = doc(db, 'invoices', invoiceId);
+    await updateDoc(invoiceRef, {
+      ...updates,
+      updatedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error('Error updating invoice:', error);
+    throw error;
+  }
+};
+
+/**
+ * Delete an invoice
+ */
+export const deleteInvoice = async (invoiceId: string): Promise<void> => {
+  try {
+    await deleteDoc(doc(db, 'invoices', invoiceId));
+  } catch (error) {
+    console.error('Error deleting invoice:', error);
+    throw error;
+  }
+};
+
+/**
+ * Get a single invoice by ID
+ */
+export const getInvoice = async (invoiceId: string): Promise<Invoice | null> => {
+  try {
+    const docSnap = await getDoc(doc(db, 'invoices', invoiceId));
+    if (docSnap.exists()) {
+      return { id: docSnap.id, ...docSnap.data() } as Invoice;
+    }
+    return null;
+  } catch (error) {
+    console.error('Error fetching invoice:', error);
+    throw error;
+  }
+};
+
+// ============ INVOICE STATUS MANAGEMENT ============
+
+/**
+ * Send an invoice to the client
+ */
+export const sendInvoice = async (invoiceId: string): Promise<void> => {
+  try {
+    const invoiceRef = doc(db, 'invoices', invoiceId);
+    await updateDoc(invoiceRef, {
+      status: InvoiceStatus.SENT,
+      sentAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+  } catch (error) {
+    console.error('Error sending invoice:', error);
+    throw error;
+  }
+};
+
+/**
+ * Mark an invoice as paid
+ */
+export const markInvoiceAsPaid = async (
+  invoiceId: string,
+  paymentDetails?: {
+    method: 'card' | 'cash' | 'check' | 'bank_transfer' | 'other';
+    reference?: string;
+    note?: string;
+  }
 ): Promise<void> => {
   try {
     const invoiceRef = doc(db, 'invoices', invoiceId);
     const invoiceDoc = await getDoc(invoiceRef);
-    
+
     if (!invoiceDoc.exists()) {
       throw new Error('Invoice not found');
     }
-    
-    const currentInvoice = invoiceDoc.data() as Invoice;
-    
-    if (currentInvoice.status !== InvoiceStatus.DRAFT) {
-      throw new Error('Cannot edit a published invoice');
-    }
-    
-    const updateData: any = {
-      ...updates,
-      updatedAt: new Date().toISOString(),
+
+    const invoice = invoiceDoc.data() as Invoice;
+    const now = new Date().toISOString();
+
+    const payment = {
+      id: Math.random().toString(36).substr(2, 9),
+      amount: invoice.amountDue,
+      method: paymentDetails?.method || 'other',
+      date: now,
+      reference: paymentDetails?.reference,
+      note: paymentDetails?.note,
     };
-    
-    // Recalculate totals if line items changed
-    if (updates.lineItems) {
-      const lineItems: InvoiceLineItem[] = updates.lineItems.map((item, index) => ({
-        id: `item-${Date.now()}-${index}`,
-        description: item.description,
-        quantity: item.quantity,
-        unitPrice: item.unitPrice,
-        totalPrice: item.quantity * item.unitPrice,
-        milestoneId: item.milestoneId,
-      }));
-      
-      const totals = calculateInvoiceTotals(
-        lineItems,
-        updates.taxRate ?? currentInvoice.taxRate ?? 0,
-        updates.discountAmount ?? currentInvoice.discountAmount ?? 0
-      );
-      
-      Object.assign(updateData, { lineItems, ...totals });
-    }
-    
-    await updateDoc(invoiceRef, updateData);
+
+    await updateDoc(invoiceRef, {
+      status: InvoiceStatus.PAID,
+      amountPaid: invoice.total,
+      amountDue: 0,
+      paidDate: now,
+      payments: [...(invoice.payments || []), payment],
+      updatedAt: now,
+    });
   } catch (error) {
-    console.error("Error updating invoice:", error);
+    console.error('Error marking invoice as paid:', error);
     throw error;
   }
 };
 
-// ============ CANCEL INVOICE ============
+/**
+ * Record a partial payment on an invoice
+ */
+export const recordPartialPayment = async (
+  invoiceId: string,
+  amount: number,
+  paymentDetails: {
+    method: 'card' | 'cash' | 'check' | 'bank_transfer' | 'other';
+    reference?: string;
+    note?: string;
+  }
+): Promise<void> => {
+  try {
+    const invoiceRef = doc(db, 'invoices', invoiceId);
+    const invoiceDoc = await getDoc(invoiceRef);
+
+    if (!invoiceDoc.exists()) {
+      throw new Error('Invoice not found');
+    }
+
+    const invoice = invoiceDoc.data() as Invoice;
+    const now = new Date().toISOString();
+
+    const newAmountPaid = (invoice.amountPaid || 0) + amount;
+    const newAmountDue = invoice.total - newAmountPaid;
+
+    const payment = {
+      id: Math.random().toString(36).substr(2, 9),
+      amount,
+      method: paymentDetails.method,
+      date: now,
+      reference: paymentDetails.reference,
+      note: paymentDetails.note,
+    };
+
+    const newStatus: InvoiceStatus = newAmountDue <= 0 
+      ? InvoiceStatus.PAID 
+      : InvoiceStatus.PARTIALLY_PAID;
+
+    await updateDoc(invoiceRef, {
+      status: newStatus,
+      amountPaid: newAmountPaid,
+      amountDue: Math.max(0, newAmountDue),
+      paidDate: newAmountDue <= 0 ? now : null,
+      payments: [...(invoice.payments || []), payment],
+      updatedAt: now,
+    });
+  } catch (error) {
+    console.error('Error recording partial payment:', error);
+    throw error;
+  }
+};
 
 /**
- * Cancel an invoice (also cancels in Square if published)
+ * Cancel an invoice
  */
 export const cancelInvoice = async (invoiceId: string): Promise<void> => {
   try {
     const invoiceRef = doc(db, 'invoices', invoiceId);
-    const invoiceDoc = await getDoc(invoiceRef);
-    
-    if (!invoiceDoc.exists()) {
-      throw new Error('Invoice not found');
-    }
-    
-    const invoice = invoiceDoc.data() as Invoice;
-    
-    // If published to Square, cancel there too
-    if (invoice.squareInvoiceId) {
-      const cancelInvoiceFn = httpsCallable(functions, 'cancelInvoice');
-      await cancelInvoiceFn({ invoiceId });
-    } else {
-      // Just update local status
-      await updateDoc(invoiceRef, {
-        status: InvoiceStatus.CANCELED,
-        updatedAt: new Date().toISOString(),
-      });
-    }
-  } catch (error) {
-    console.error("Error canceling invoice:", error);
-    throw error;
-  }
-};
-
-// ============ DELETE INVOICE ============
-
-/**
- * Delete a draft invoice (can't delete published invoices)
- */
-export const deleteInvoice = async (invoiceId: string): Promise<void> => {
-  try {
-    const invoiceRef = doc(db, 'invoices', invoiceId);
-    const invoiceDoc = await getDoc(invoiceRef);
-    
-    if (!invoiceDoc.exists()) {
-      throw new Error('Invoice not found');
-    }
-    
-    const invoice = invoiceDoc.data() as Invoice;
-    
-    if (invoice.status !== InvoiceStatus.DRAFT) {
-      throw new Error('Cannot delete a published invoice. Cancel it instead.');
-    }
-    
-    await deleteDoc(invoiceRef);
-  } catch (error) {
-    console.error("Error deleting invoice:", error);
-    throw error;
-  }
-};
-
-// ============ RECORD MANUAL PAYMENT ============
-
-/**
- * Record a manual payment (cash, check, bank transfer)
- */
-export const recordManualPayment = async (
-  invoiceId: string,
-  payment: {
-    amount: number;
-    method: PaymentMethod;
-    note?: string;
-  },
-  recordedBy: string
-): Promise<void> => {
-  try {
-    const invoiceRef = doc(db, 'invoices', invoiceId);
-    const invoiceDoc = await getDoc(invoiceRef);
-    
-    if (!invoiceDoc.exists()) {
-      throw new Error('Invoice not found');
-    }
-    
-    const invoice = invoiceDoc.data() as Invoice;
-    
-    if (invoice.status === InvoiceStatus.CANCELED) {
-      throw new Error('Cannot record payment on a canceled invoice');
-    }
-    
-    if (invoice.status === InvoiceStatus.PAID) {
-      throw new Error('Invoice is already fully paid');
-    }
-    
-    const newPayment: InvoicePayment = {
-      id: `payment-${Date.now()}`,
-      amount: payment.amount,
-      method: payment.method,
-      paidAt: new Date().toISOString(),
-      note: payment.note,
-      recordedBy,
-    };
-    
-    const payments = [...(invoice.payments || []), newPayment];
-    const amountPaid = payments.reduce((sum, p) => sum + p.amount, 0);
-    const amountDue = invoice.totalAmount - amountPaid;
-    
-    let status = invoice.status;
-    let paidAt = invoice.paidAt;
-    
-    if (amountDue <= 0) {
-      status = InvoiceStatus.PAID;
-      paidAt = new Date().toISOString();
-    } else if (amountPaid > 0) {
-      status = InvoiceStatus.PARTIALLY_PAID;
-    }
-    
     await updateDoc(invoiceRef, {
-      payments,
-      amountPaid,
-      amountDue: Math.max(0, amountDue),
-      status,
-      paidAt,
+      status: InvoiceStatus.CANCELLED,
       updatedAt: new Date().toISOString(),
     });
   } catch (error) {
-    console.error("Error recording payment:", error);
+    console.error('Error cancelling invoice:', error);
     throw error;
   }
 };
 
-// ============ SEND REMINDER ============
-
 /**
- * Send a payment reminder (via Square)
+ * Check and update overdue invoices
+ * This should be called periodically (e.g., via a cron job or cloud function)
  */
-export const sendInvoiceReminder = async (invoiceId: string): Promise<void> => {
+export const checkOverdueInvoices = async (): Promise<number> => {
   try {
-    const sendReminderFn = httpsCallable(functions, 'sendInvoiceReminder');
-    await sendReminderFn({ invoiceId });
-  } catch (error: any) {
-    console.error("Error sending reminder:", error);
-    throw new Error(error.message || 'Failed to send reminder');
+    const today = new Date().toISOString().split('T')[0];
+    
+    // Get all sent invoices that are past due
+    const q = query(
+      collection(db, 'invoices'),
+      where('status', '==', InvoiceStatus.SENT),
+      where('dueDate', '<', today)
+    );
+
+    const snapshot = await getDocs(q);
+    let updatedCount = 0;
+
+    for (const docSnapshot of snapshot.docs) {
+      await updateDoc(doc(db, 'invoices', docSnapshot.id), {
+        status: InvoiceStatus.OVERDUE,
+        updatedAt: new Date().toISOString(),
+      });
+      updatedCount++;
+    }
+
+    return updatedCount;
+  } catch (error) {
+    console.error('Error checking overdue invoices:', error);
+    throw error;
   }
 };
 
-// ============ GET INVOICE STATS ============
+// ============ SQUARE INTEGRATION (Placeholder) ============
+
+/**
+ * Create a Square invoice and payment link
+ * Note: This requires a Firebase Cloud Function to handle the Square API call
+ */
+export const createSquareInvoice = async (invoiceId: string): Promise<string> => {
+  try {
+    const createSquareInvoiceFunction = httpsCallable(functions, 'createSquareInvoice');
+    const result = await createSquareInvoiceFunction({ invoiceId });
+    const data = result.data as { paymentLinkUrl: string };
+    return data.paymentLinkUrl;
+  } catch (error) {
+    console.error('Error creating Square invoice:', error);
+    throw error;
+  }
+};
+
+/**
+ * Sync payment status from Square
+ * Note: This requires a Firebase Cloud Function to handle the Square API call
+ */
+export const syncSquarePaymentStatus = async (invoiceId: string): Promise<void> => {
+  try {
+    const syncPaymentFunction = httpsCallable(functions, 'syncSquarePayment');
+    await syncPaymentFunction({ invoiceId });
+  } catch (error) {
+    console.error('Error syncing Square payment:', error);
+    throw error;
+  }
+};
+
+// ============ INVOICE CALCULATIONS ============
+
+/**
+ * Calculate invoice totals from line items
+ */
+export const calculateInvoiceTotals = (
+  lineItems: { quantity: number; unitPrice: number }[],
+  taxRate: number = 0
+): { subtotal: number; taxAmount: number; total: number } => {
+  const subtotal = lineItems.reduce(
+    (sum, item) => sum + item.quantity * item.unitPrice,
+    0
+  );
+  const taxAmount = subtotal * (taxRate / 100);
+  const total = subtotal + taxAmount;
+
+  return {
+    subtotal: Math.round(subtotal * 100) / 100,
+    taxAmount: Math.round(taxAmount * 100) / 100,
+    total: Math.round(total * 100) / 100,
+  };
+};
 
 /**
  * Get invoice statistics for dashboard
  */
-export const getInvoiceStats = (invoices: Invoice[]) => {
-  const stats = {
-    total: invoices.length,
-    draft: 0,
-    sent: 0,
-    overdue: 0,
-    paid: 0,
-    partiallyPaid: 0,
-    canceled: 0,
-    totalRevenue: 0,        // Sum of paid amounts
-    outstandingAmount: 0,   // Sum of unpaid amounts
-    overdueAmount: 0,       // Sum of overdue amounts
-  };
-  
-  const today = new Date().toISOString().split('T')[0];
-  
-  invoices.forEach(invoice => {
-    switch (invoice.status) {
-      case InvoiceStatus.DRAFT:
-        stats.draft++;
-        break;
-      case InvoiceStatus.SENT:
-      case InvoiceStatus.SCHEDULED:
-        stats.sent++;
-        if (invoice.dueDate < today) {
-          stats.overdue++;
-          stats.overdueAmount += invoice.amountDue;
-        } else {
-          stats.outstandingAmount += invoice.amountDue;
-        }
-        break;
-      case InvoiceStatus.OVERDUE:
-        stats.overdue++;
-        stats.overdueAmount += invoice.amountDue;
-        break;
-      case InvoiceStatus.PARTIALLY_PAID:
-        stats.partiallyPaid++;
-        stats.totalRevenue += invoice.amountPaid;
-        if (invoice.dueDate < today) {
-          stats.overdueAmount += invoice.amountDue;
-        } else {
-          stats.outstandingAmount += invoice.amountDue;
-        }
-        break;
-      case InvoiceStatus.PAID:
-        stats.paid++;
-        stats.totalRevenue += invoice.amountPaid;
-        break;
-      case InvoiceStatus.CANCELED:
-        stats.canceled++;
-        break;
+export const getInvoiceStats = async (userId: string, userRole: UserRole) => {
+  try {
+    let q;
+
+    if (userRole === UserRole.ADMIN) {
+      q = query(collection(db, 'invoices'));
+    } else if (userRole === UserRole.CLIENT) {
+      q = query(collection(db, 'invoices'), where('clientId', '==', userId));
+    } else {
+      q = query(collection(db, 'invoices'), where('createdBy', '==', userId));
     }
-  });
-  
-  return stats;
-};
 
-// ============ FORMAT HELPERS ============
+    const snapshot = await getDocs(q);
+    const invoices = snapshot.docs.map((doc) => doc.data() as Invoice);
 
-/**
- * Format cents to dollars string
- */
-export const formatCurrency = (cents: number): string => {
-  return (cents / 100).toLocaleString('en-US', {
-    style: 'currency',
-    currency: 'USD',
-  });
-};
+    const stats = {
+      total: invoices.length,
+      draft: invoices.filter((i) => i.status === InvoiceStatus.DRAFT).length,
+      sent: invoices.filter((i) => i.status === InvoiceStatus.SENT).length,
+      paid: invoices.filter((i) => i.status === InvoiceStatus.PAID).length,
+      overdue: invoices.filter((i) => i.status === InvoiceStatus.OVERDUE).length,
+      totalAmount: invoices.reduce((sum, i) => sum + i.total, 0),
+      totalPaid: invoices.reduce((sum, i) => sum + (i.amountPaid || 0), 0),
+      totalOutstanding: invoices.reduce((sum, i) => sum + (i.amountDue || 0), 0),
+    };
 
-/**
- * Parse dollars to cents
- */
-export const dollarsToCents = (dollars: number): number => {
-  return Math.round(dollars * 100);
-};
-
-/**
- * Get status badge color
- */
-export const getInvoiceStatusColor = (status: InvoiceStatus): string => {
-  switch (status) {
-    case InvoiceStatus.DRAFT:
-      return 'bg-gray-100 text-gray-700';
-    case InvoiceStatus.SCHEDULED:
-      return 'bg-blue-100 text-blue-700';
-    case InvoiceStatus.SENT:
-      return 'bg-amber-100 text-amber-700';
-    case InvoiceStatus.PARTIALLY_PAID:
-      return 'bg-violet-100 text-violet-700';
-    case InvoiceStatus.PAID:
-      return 'bg-emerald-100 text-emerald-700';
-    case InvoiceStatus.OVERDUE:
-      return 'bg-red-100 text-red-700';
-    case InvoiceStatus.CANCELED:
-      return 'bg-gray-100 text-gray-500';
-    case InvoiceStatus.REFUNDED:
-      return 'bg-orange-100 text-orange-700';
-    default:
-      return 'bg-gray-100 text-gray-700';
+    return stats;
+  } catch (error) {
+    console.error('Error getting invoice stats:', error);
+    throw error;
   }
 };

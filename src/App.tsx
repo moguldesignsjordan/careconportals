@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from './context/AuthContext';
 import { User, UserRole, Project, Document as ProjectDocument, Message, Milestone } from './types';
+import { Invoice } from './types/invoice';
 import {
   subscribeToProjects,
   subscribeToUsers,
@@ -43,6 +44,7 @@ import DocumentsTab from './components/DocumentsTab';
 import UsersDirectory from './components/UsersDirectory';
 import SettingsPage from './components/SettingsPage';
 import LoginPage from './components/LoginPage';
+import InvoicesPage from './components/InvoicesPage';
 
 // Icons
 import { Loader2, Menu, CheckCircle, XCircle, Info, ArrowLeft, LayoutGrid, Clock } from 'lucide-react';
@@ -56,7 +58,8 @@ type ViewType =
   | 'documents'
   | 'directory'
   | 'settings'
-  | 'calendar';
+  | 'calendar'
+  | 'invoices';
 
 interface Toast {
   id: string;
@@ -73,6 +76,7 @@ const App: React.FC = () => {
   const [documents, setDocuments] = useState<ProjectDocument[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [dataLoading, setDataLoading] = useState(true);
 
   // UI state
@@ -86,6 +90,8 @@ const App: React.FC = () => {
   const [showCreateProject, setShowCreateProject] = useState(false);
   const [showCreateClient, setShowCreateClient] = useState(false);
   const [showCreateContractor, setShowCreateContractor] = useState(false);
+  const [showCreateInvoice, setShowCreateInvoice] = useState(false);
+  const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
 
   // Toast notifications
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -98,15 +104,42 @@ const App: React.FC = () => {
     }
 
     setDataLoading(true);
+    let projectsLoaded = false;
+    let usersLoaded = false;
 
-    const unsubProjects = subscribeToProjects(user, (data) => {
-      setProjects(data);
+    const checkIfReady = () => {
+      if (projectsLoaded && usersLoaded) {
+        setDataLoading(false);
+      }
+    };
+
+    // ✅ SAFETY TIMEOUT: Prevent infinite loading if subscriptions don't fire
+    const loadingTimeout = setTimeout(() => {
+      console.warn('⚠️ Loading timeout reached - forcing data load completion');
       setDataLoading(false);
+    }, 5000); // 5 second timeout
+
+    console.log('=== Setting up subscriptions ===');
+    
+    const unsubProjects = subscribeToProjects(user, (data) => {
+      console.log('Projects subscription fired:', data.length, 'projects');
+      setProjects(data);
+      projectsLoaded = true;
+      checkIfReady();
     });
 
     const unsubUsers = subscribeToUsers((data) => {
+      console.log('=== Users Subscription Callback ===');
+      console.log('Users data received:', data);
+      console.log('Is array?', Array.isArray(data));
+      console.log('Length:', data?.length || 0);
+      console.log('===================================');
       setUsers(data);
+      usersLoaded = true;
+      checkIfReady();
     });
+
+    console.log('Subscriptions set up, waiting for callbacks...');
 
     const unsubDocs = subscribeToDocuments((data) => {
       setDocuments(data);
@@ -121,6 +154,7 @@ const App: React.FC = () => {
     });
 
     return () => {
+      clearTimeout(loadingTimeout);
       unsubProjects();
       unsubUsers();
       unsubDocs();
@@ -414,6 +448,24 @@ const App: React.FC = () => {
     }
   };
 
+  // Invoice handlers
+  const handleCreateInvoice = async (invoiceData: any) => {
+    try {
+      // TODO: Implement actual invoice creation logic with Firebase/Square
+      console.log('Creating invoice:', invoiceData);
+      showToast('Invoice created successfully!', 'success');
+      setShowCreateInvoice(false);
+    } catch (error: any) {
+      showToast(error.message || 'Failed to create invoice', 'error');
+      throw error;
+    }
+  };
+
+  const handleViewInvoice = (invoice: Invoice) => {
+    setSelectedInvoice(invoice);
+    console.log('Viewing invoice:', invoice);
+  };
+
   // Loading state
   if (authLoading) {
     return (
@@ -537,7 +589,7 @@ const App: React.FC = () => {
             documents={documents}
             currentUser={user}
             users={users}
-            projects={projects}          // 👈 add this line
+            projects={projects}
             onUpload={handleUploadDocument}
             onDelete={handleDeleteDocument}
           />
@@ -567,6 +619,16 @@ const App: React.FC = () => {
             onCreateEvent={handleCreateCalendarEvent}
             onUpdateEvent={handleUpdateCalendarEvent}
             onDeleteEvent={handleDeleteCalendarEvent}
+          />
+        );
+
+      case 'invoices':
+        return (
+          <InvoicesPage
+            currentUser={user}
+            invoices={invoices}
+            onCreateInvoice={() => setShowCreateInvoice(true)}
+            onViewInvoice={handleViewInvoice}
           />
         );
 
@@ -623,8 +685,8 @@ const App: React.FC = () => {
 
   return (
     <div className="h-screen bg-white flex overflow-hidden">
-      {/* Mobile header */}
-      <div className="lg:hidden fixed top-0 left-0 right-0 h-16 bg-white border-b border-gray-100 flex items-center justify-between px-4 z-40">
+      {/* Mobile header - z-30 (below overlay) */}
+      <div className="lg:hidden fixed top-0 left-0 right-0 h-16 bg-white border-b border-gray-100 flex items-center justify-between px-4 z-30">
         <button
           onClick={() => setSidebarOpen(true)}
           className="p-2 rounded-xl hover:bg-care-orange/10 transition-colors"
@@ -635,7 +697,15 @@ const App: React.FC = () => {
         <div className="w-10" />
       </div>
 
-      {/* Sidebar */}
+      {/* Mobile overlay - z-40 (above header, below sidebar) */}
+      {sidebarOpen && (
+        <div
+          className="lg:hidden fixed inset-0 bg-black/50 z-40"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
+      {/* Sidebar - z-50 (above everything) */}
       <Sidebar
         currentUser={user}
         activeTab={currentView}
@@ -644,17 +714,9 @@ const App: React.FC = () => {
         onClose={() => setSidebarOpen(false)}
       />
 
-      {/* Mobile overlay */}
-      {sidebarOpen && (
-        <div
-          className="lg:hidden fixed inset-0 bg-black/50 z-40"
-          onClick={() => setSidebarOpen(false)}
-        />
-      )}
-
       {/* Main content area */}
-      <div className="flex-1 flex flex-col min-w-0 pt-16 lg:pt-8 overflow-y-auto">
-        <main className="flex-1 px-4 lg:px-8 pb-8">
+      <div className="flex-1 flex flex-col min-w-0 pt-16 lg:pt-0 overflow-y-auto">
+        <main className="flex-1 px-4 lg:px-8 py-8">
           {dataLoading ? (
             <div className="flex items-center justify-center py-20">
               <Loader2 size={32} className="animate-spin text-care-orange" />
@@ -686,6 +748,24 @@ const App: React.FC = () => {
         onClose={() => setShowCreateContractor(false)}
         onCreate={handleCreateContractor}
       />
+
+      {/* Invoice Modal Placeholder - TODO: Implement CreateInvoiceModal */}
+      {showCreateInvoice && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl p-6 max-w-md w-full">
+            <h2 className="text-xl font-bold mb-4">Create Invoice</h2>
+            <p className="text-sm text-gray-600 mb-4">
+              Invoice creation modal coming soon! This will integrate with Square for payment processing.
+            </p>
+            <button
+              onClick={() => setShowCreateInvoice(false)}
+              className="px-4 py-2 bg-care-orange text-white rounded-lg hover:bg-orange-600 transition-colors"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Toast notifications – brand colors only */}
       <div className="fixed bottom-4 right-4 z-[200] space-y-2">

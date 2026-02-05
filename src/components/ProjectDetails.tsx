@@ -316,6 +316,23 @@ const ProjectDetails: React.FC<ProjectDetailsProps> = ({
     (u) => !contractorIds.includes(u.id)
   );
 
+  // Debug logging to help identify team visibility issues
+  console.log('Team Debug Info:', {
+    projectId: project.id,
+    projectName: project.name,
+    clientIds,
+    contractorIds,
+    totalUsers: users.length,
+    allClients: allClients.length,
+    allContractors: allContractors.length,
+    projectClients: projectClients.map(c => c.name),
+    projectContractors: projectContractors.map(c => c.name),
+    primaryClient: primaryClient?.name || 'none',
+    primaryContractor: primaryContractor?.name || 'none',
+    currentUserRole: currentUser.role,
+    currentUserName: currentUser.name,
+  });
+
   const handleAddContractor = async (contractorId: string) => {
     if (!contractorId) return;
     setTeamSaving(true);
@@ -717,9 +734,19 @@ const ProjectDetails: React.FC<ProjectDetailsProps> = ({
                 </div>
               </div>
             ) : (
-              <p className="text-xs text-gray-500 mb-4">
-                No client assigned yet.
-              </p>
+              <div className="mb-4 pb-4 border-b border-dashed border-gray-100">
+                <p className="text-[11px] text-gray-400 uppercase tracking-[0.18em] mb-2">
+                  Client
+                </p>
+                <p className="text-xs text-gray-500">
+                  No client assigned yet.
+                  {currentUser.role === UserRole.CONTRACTOR && (
+                    <span className="block mt-1 text-[10px]">
+                      (Contact admin to assign a client)
+                    </span>
+                  )}
+                </p>
+              </div>
             )}
 
             {/* Contractors */}
@@ -731,11 +758,17 @@ const ProjectDetails: React.FC<ProjectDetailsProps> = ({
               {projectContractors.length === 0 ? (
                 <p className="text-xs text-gray-500 mb-2">
                   No contractors assigned.
+                  {currentUser.role === UserRole.CONTRACTOR && (
+                    <span className="block mt-1 text-[10px]">
+                      (Contact admin to add contractors to this project)
+                    </span>
+                  )}
                 </p>
               ) : (
                 <div className="space-y-2 mb-3">
                   {projectContractors.map((c) => {
                     const isPrimary = c.id === primaryContractor?.id;
+                    const isCurrentUser = c.id === currentUser.id;
                     return (
                       <div
                         key={c.id}
@@ -748,6 +781,9 @@ const ProjectDetails: React.FC<ProjectDetailsProps> = ({
                           <div>
                             <p className="text-xs font-semibold text-gray-900">
                               {c.name}
+                              {isCurrentUser && (
+                                <span className="ml-1 text-[10px] text-gray-400">(You)</span>
+                              )}
                             </p>
                             <p className="text-[11px] text-gray-500">
                               {c.specialty || c.email}
@@ -760,16 +796,18 @@ const ProjectDetails: React.FC<ProjectDetailsProps> = ({
                           </div>
                         </div>
                         <div className="flex items-center gap-1">
-                          <button
-                            type="button"
-                            onClick={() => onMessage(c, project.id)}
-                            className="p-1.5 hover:bg-gray-50 rounded-lg transition-colors"
-                          >
-                            <MessageSquare
-                              size={14}
-                              className="text-care-orange"
-                            />
-                          </button>
+                          {!isCurrentUser && (
+                            <button
+                              type="button"
+                              onClick={() => onMessage(c, project.id)}
+                              className="p-1.5 hover:bg-gray-50 rounded-lg transition-colors"
+                            >
+                              <MessageSquare
+                                size={14}
+                                className="text-care-orange"
+                              />
+                            </button>
+                          )}
                           {currentUser.role === UserRole.ADMIN && (
                             <>
                               {!isPrimary && (

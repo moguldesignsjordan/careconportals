@@ -1023,14 +1023,14 @@ export const createCalendarEvent = async (
 
     const payload = {
       title: eventData.title,
-      description: eventData.description,
+      description: eventData.description || null,
       date: eventData.date,
       startTime: eventData.startTime,
-      endTime: eventData.endTime,
-      location: eventData.location,
+      endTime: eventData.endTime || null,
+      location: eventData.location || null,
       type: eventData.type,
       projectId: eventData.projectId || null,
-      attendees: eventData.attendeeIds,
+      attendees: eventData.attendeeIds || [],
       createdBy: eventData.createdBy,
       createdAt,
     };
@@ -1051,10 +1051,18 @@ export const updateCalendarEvent = async (
     const eventRef = doc(db, 'calendarEvents', eventId);
     
     // Map attendeeIds to attendees for Firestore storage
-    const payload: Record<string, any> = { ...updates };
-    if (updates.attendeeIds) {
-      payload.attendees = updates.attendeeIds;
-      delete payload.attendeeIds;
+    const raw: Record<string, any> = { ...updates };
+    if (raw.attendeeIds) {
+      raw.attendees = raw.attendeeIds;
+    }
+    delete raw.attendeeIds;
+    
+    // Strip undefined values — Firestore rejects them
+    const payload: Record<string, any> = {};
+    for (const [key, value] of Object.entries(raw)) {
+      if (value !== undefined) {
+        payload[key] = value;
+      }
     }
     
     await updateDoc(eventRef, payload);

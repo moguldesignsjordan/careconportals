@@ -359,11 +359,11 @@ const InvoicePaymentPage: React.FC<InvoicePaymentPageProps> = ({
                           <Briefcase className="text-blue-600" size={18} />
                         </div>
                         <div className="min-w-0">
-                          <p className="font-bold text-[#111827]">{project.name}</p>
-                          {project.address && (
+                          <p className="font-bold text-[#111827]">{project.title}</p>
+                          {project.location && (
                             <div className="flex items-center gap-1.5 text-sm text-gray-500 mt-1">
                               <MapPin size={12} />
-                              <span className="truncate">{project.address}</span>
+                              <span className="truncate">{project.location}</span>
                             </div>
                           )}
                         </div>
@@ -391,7 +391,7 @@ const InvoicePaymentPage: React.FC<InvoicePaymentPageProps> = ({
                       )}
                     </div>
                     <div className="text-right ml-4">
-                      <p className="font-bold text-[#111827]">{formatCurrency(item.amount)}</p>
+                      <p className="font-bold text-[#111827]">{formatCurrency(item.totalPrice)}</p>
                     </div>
                   </div>
                 ))}

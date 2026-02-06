@@ -14,6 +14,12 @@ import { User, Project, CalendarEvent } from '../types';
 
 interface CalendarPageProps {
   currentUser: User;
+  events?: CalendarEvent[];
+  projects?: Project[];
+  users?: User[];
+  onCreateEvent?: (eventData: Omit<CalendarEvent, 'id' | 'createdAt'>) => Promise<void>;
+  onUpdateEvent?: (eventId: string, updates: Partial<CalendarEvent>) => Promise<void>;
+  onDeleteEvent?: (eventId: string) => Promise<void>;
 }
 
 const CalendarPage: React.FC<CalendarPageProps> = ({ currentUser }) => {

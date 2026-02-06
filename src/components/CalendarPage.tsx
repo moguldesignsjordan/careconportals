@@ -10,7 +10,7 @@ import {
   Eye,
   EyeOff,
 } from 'lucide-react';
-import { User } from '../types';
+import { User, Project, CalendarEvent } from '../types';
 
 interface CalendarPageProps {
   currentUser: User;

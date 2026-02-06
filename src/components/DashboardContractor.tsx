@@ -1,10 +1,9 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Project, User, ProjectStatus } from '../types';
 import {
   Hammer,
   Calendar,
   TrendingUp,
-  Plus,
   Clock,
   CheckCircle,
   DollarSign,
@@ -12,15 +11,16 @@ import {
   Hourglass,
   AlertCircle,
   Users as UsersIcon,
+  Trash2,
 } from 'lucide-react';
 import ProjectCard from './ProjectCard';
+import { deleteProject } from '../services/db';
 
 interface DashboardContractorProps {
   projects: Project[];
   users: User[];
   currentUser: User;
   onSelectProject: (p: Project) => void;
-  onOpenCreateModal: () => void;
   onOpenMessages: () => void;
 }
 
@@ -29,7 +29,6 @@ const DashboardContractor: React.FC<DashboardContractorProps> = ({
   users = [],
   currentUser,
   onSelectProject,
-  onOpenCreateModal,
   onOpenMessages,
 }) => {
   // Safety check: Ensure projects and users are arrays
@@ -84,6 +83,17 @@ const DashboardContractor: React.FC<DashboardContractorProps> = ({
     return { client, contractors };
   };
 
+  // Delete project
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const handleDelete = async (projectId: string) => {
+    try {
+      await deleteProject(projectId);
+      setConfirmDeleteId(null);
+    } catch (e) {
+      console.error('Delete failed', e);
+    }
+  };
+
   return (
     <div className="space-y-8">
       {/* Header */}
@@ -101,13 +111,6 @@ const DashboardContractor: React.FC<DashboardContractorProps> = ({
         </div>
 
         <div className="flex flex-wrap gap-2">
-          <button
-            onClick={onOpenCreateModal}
-            className="flex items-center gap-2 px-4 py-2.5 bg-care-orange text-white rounded-xl text-xs font-black uppercase tracking-wider hover:bg-orange-600 transition-all shadow-lg shadow-care-orange/20"
-          >
-            <Plus size={16} />
-            New Project
-          </button>
           <button
             onClick={onOpenMessages}
             className="flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-200 text-gray-700 rounded-xl text-xs font-black uppercase tracking-wider hover:border-care-orange/40 transition-all"
@@ -214,8 +217,8 @@ const DashboardContractor: React.FC<DashboardContractorProps> = ({
           <div key={p.id} className="flex items-start gap-3 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
             <AlertCircle size={18} className="text-red-500 mt-0.5 shrink-0" />
             <div className="text-xs">
-              <p className="font-black text-red-700">{p.name} — approval declined</p>
-              <p className="text-red-600 mt-0.5">{p.rejectionReason}</p>
+              <p className="font-black text-red-700">{p.title || p.name || 'Untitled Project'} — approval declined</p>
+              <p className="text-red-600 mt-0.5">{p.rejectionReason || 'No reason provided'}</p>
             </div>
           </div>
         ))}
@@ -228,9 +231,41 @@ const DashboardContractor: React.FC<DashboardContractorProps> = ({
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
             {myProjects.map((project) => {
               const { client, contractors } = getProjectTeam(project);
+              const isConfirmingDelete = confirmDeleteId === project.id;
               
               return (
-                <div key={project.id} className="bg-white border border-gray-100 rounded-2xl overflow-hidden hover:border-gray-200 transition-all">
+                <div key={project.id} className="bg-white border border-gray-100 rounded-2xl overflow-hidden hover:border-gray-200 transition-all relative group">
+                  {/* Delete confirmation overlay */}
+                  {isConfirmingDelete && (
+                    <div className="absolute inset-0 bg-white/95 rounded-2xl z-10 flex flex-col items-center justify-center p-5 text-center">
+                      <Trash2 size={24} className="text-red-500 mb-2" />
+                      <p className="text-sm font-black text-[#111827] mb-1">Delete this project?</p>
+                      <p className="text-xs text-gray-500 mb-4">This cannot be undone.</p>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => handleDelete(project.id)}
+                          className="px-4 py-1.5 bg-red-600 text-white text-xs font-black rounded-lg hover:bg-red-700 transition-colors"
+                        >
+                          Delete
+                        </button>
+                        <button
+                          onClick={() => setConfirmDeleteId(null)}
+                          className="px-4 py-1.5 border border-gray-200 text-gray-600 text-xs font-black rounded-lg hover:bg-gray-50 transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Delete trigger button */}
+                  <button
+                    onClick={() => setConfirmDeleteId(project.id)}
+                    className="absolute top-3 right-3 z-10 p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all opacity-0 group-hover:opacity-100"
+                    title="Delete project"
+                  >
+                    <Trash2 size={15} />
+                  </button>
                   {/* Original Project Card */}
                   <div onClick={() => onSelectProject(project)} className="cursor-pointer">
                     <ProjectCard

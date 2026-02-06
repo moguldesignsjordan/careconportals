@@ -736,7 +736,6 @@ const App: React.FC = () => {
               users={users}
               currentUser={user}
               onSelectProject={handleSelectProject}
-              onOpenCreateModal={() => setShowCreateProject(true)}
               onOpenMessages={() => handleOpenMessages()}
             />
           );

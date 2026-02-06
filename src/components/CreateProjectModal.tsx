@@ -18,8 +18,7 @@ interface MultiSelectDropdownProps {
   options: User[];
   selectedIds: string[];
   primaryId: string;
-  onSelectionChange: (ids: string[]) => void;
-  onPrimaryChange: (id: string) => void;
+  onSelectionChange: (ids: string[], newPrimaryId?: string) => void;
   disabled?: boolean;
   icon?: React.ReactNode;
 }
@@ -31,7 +30,6 @@ const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
   selectedIds,
   primaryId,
   onSelectionChange,
-  onPrimaryChange,
   disabled,
   icon
 }) => {
@@ -54,18 +52,20 @@ const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
       // Don't allow removing if it's the only selection
       if (selectedIds.length === 1) return;
       
+      const newIds = selectedIds.filter(id => id !== userId);
       // If removing the primary, set a new primary
       if (userId === primaryId) {
-        const remaining = selectedIds.filter(id => id !== userId);
-        onPrimaryChange(remaining[0]);
+        onSelectionChange(newIds, newIds[0]);
+      } else {
+        onSelectionChange(newIds);
       }
-      onSelectionChange(selectedIds.filter(id => id !== userId));
     } else {
-      const newSelection = [...selectedIds, userId];
-      onSelectionChange(newSelection);
+      const newIds = [...selectedIds, userId];
       // If this is the first selection, make it primary
       if (selectedIds.length === 0) {
-        onPrimaryChange(userId);
+        onSelectionChange(newIds, userId);
+      } else {
+        onSelectionChange(newIds);
       }
     }
   };
@@ -73,7 +73,8 @@ const MultiSelectDropdown: React.FC<MultiSelectDropdownProps> = ({
   const handleSetPrimary = (e: React.MouseEvent, userId: string) => {
     e.stopPropagation();
     if (selectedIds.includes(userId)) {
-      onPrimaryChange(userId);
+      // Pass the same ids but with new primary
+      onSelectionChange(selectedIds, userId);
     }
   };
 
@@ -234,6 +235,28 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
 
   if (!isOpen) return null;
 
+  // Combined handlers that update both ids and primary in one setState call
+  const handleClientSelectionChange = (ids: string[], newPrimaryId?: string) => {
+    setFormData(prev => ({
+      ...prev,
+      clientIds: ids,
+      // If newPrimaryId is provided, use it; otherwise keep existing (unless it's no longer in the list)
+      primaryClientId: newPrimaryId !== undefined 
+        ? newPrimaryId 
+        : (ids.includes(prev.primaryClientId) ? prev.primaryClientId : (ids[0] || ''))
+    }));
+  };
+
+  const handleContractorSelectionChange = (ids: string[], newPrimaryId?: string) => {
+    setFormData(prev => ({
+      ...prev,
+      contractorIds: ids,
+      primaryContractorId: newPrimaryId !== undefined 
+        ? newPrimaryId 
+        : (ids.includes(prev.primaryContractorId) ? prev.primaryContractorId : (ids[0] || ''))
+    }));
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -277,7 +300,7 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
         estimatedEndDate: formData.estimatedEndDate,
         budget: parseFloat(formData.budget) || 0,
         spent: 0,
-        milestones: []            // ✅ keep if you want
+        milestones: []
       });
 
       onClose();
@@ -356,8 +379,7 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
             options={clients}
             selectedIds={formData.clientIds}
             primaryId={formData.primaryClientId}
-            onSelectionChange={(ids) => setFormData({ ...formData, clientIds: ids })}
-            onPrimaryChange={(id) => setFormData({ ...formData, primaryClientId: id })}
+            onSelectionChange={handleClientSelectionChange}
             icon={<UserIcon size={18} />}
           />
           {clients.length === 0 && (
@@ -371,8 +393,7 @@ const CreateProjectModal: React.FC<CreateProjectModalProps> = ({
             options={contractors}
             selectedIds={formData.contractorIds}
             primaryId={formData.primaryContractorId}
-            onSelectionChange={(ids) => setFormData({ ...formData, contractorIds: ids })}
-            onPrimaryChange={(id) => setFormData({ ...formData, primaryContractorId: id })}
+            onSelectionChange={handleContractorSelectionChange}
             disabled={currentUser.role === UserRole.CONTRACTOR}
             icon={<UserIcon size={18} />}
           />

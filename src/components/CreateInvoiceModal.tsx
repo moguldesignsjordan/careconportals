@@ -1,5 +1,5 @@
 // src/components/CreateInvoiceModal.tsx
-// Complete Invoice Creation Modal with Square Integration
+// Invoice Creation Modal - Simplified without Square dependency
 
 import React, { useState, useEffect, useMemo } from 'react';
 import {
@@ -12,7 +12,6 @@ import {
   Plus,
   Trash2,
   Loader2,
-  CreditCard,
   Send,
   Save,
   AlertCircle,
@@ -20,15 +19,9 @@ import {
 } from 'lucide-react';
 import { User, UserRole, Project } from '../types';
 import { 
-  InvoiceStatus, 
   PaymentMethod, 
   CreateInvoiceData,
-  CreateInvoiceLineItem 
 } from '../types/invoice';
-import { dollarsToCents, centsToDollars } from '../services/invoices';
-import { isSquareConfigured, getSquareConfigStatus } from '../services/square';
-
-// ============ PROPS ============
 
 interface CreateInvoiceModalProps {
   isOpen: boolean;
@@ -41,16 +34,15 @@ interface CreateInvoiceModalProps {
   preselectedClientId?: string;
 }
 
-// ============ INTERNAL TYPES ============
-
 interface LineItemForm {
   id: string;
   description: string;
   quantity: number;
-  unitPrice: number; // In dollars for display
+  unitPrice: number;
 }
 
-// ============ COMPONENT ============
+// Convert dollars to cents
+const dollarsToCents = (dollars: number): number => Math.round(dollars * 100);
 
 const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
   isOpen,
@@ -62,8 +54,6 @@ const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
   preselectedProjectId,
   preselectedClientId,
 }) => {
-  // ============ STATE ============
-  
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -74,25 +64,19 @@ const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
   const [clientId, setClientId] = useState(preselectedClientId || '');
   const [projectId, setProjectId] = useState(preselectedProjectId || '');
   const [dueDate, setDueDate] = useState('');
-  const [taxRate, setTaxRate] = useState(0); // Percentage (e.g., 8.25)
-  const [discountAmount, setDiscountAmount] = useState(0); // In dollars
+  const [taxRate, setTaxRate] = useState(0);
+  const [discountAmount, setDiscountAmount] = useState(0);
   const [customerNotes, setCustomerNotes] = useState('');
   const [internalNotes, setInternalNotes] = useState('');
   const [allowPartialPayments, setAllowPartialPayments] = useState(true);
-  const [enableSquare, setEnableSquare] = useState(true);
 
-  // Line items (in dollars for display)
   const [lineItems, setLineItems] = useState<LineItemForm[]>([
     { id: '1', description: '', quantity: 1, unitPrice: 0 },
   ]);
 
-  // ============ DERIVED DATA ============
-
-  // Get clients from users list
+  // Get clients
   const clients = useMemo(() => {
-    const clientList = users.filter((u) => u.role === UserRole.CLIENT);
-    console.log('Available clients:', clientList.length, clientList.map(c => ({ id: c.id, name: c.name, role: c.role })));
-    return clientList;
+    return users.filter((u) => u.role === UserRole.CLIENT);
   }, [users]);
 
   // Get accessible projects
@@ -107,16 +91,6 @@ const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
     });
   }, [projects, currentUser]);
 
-  // Get selected client details
-  const selectedClient = useMemo(() => {
-    return clients.find((c) => c.id === clientId);
-  }, [clients, clientId]);
-
-  // Get selected project details
-  const selectedProject = useMemo(() => {
-    return accessibleProjects.find((p) => p.id === projectId);
-  }, [accessibleProjects, projectId]);
-
   // Filter projects by selected client
   const clientProjects = useMemo(() => {
     if (!clientId) return accessibleProjects;
@@ -126,28 +100,15 @@ const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
     });
   }, [accessibleProjects, clientId]);
 
-  // Square config status
-  const squareStatus = useMemo(() => getSquareConfigStatus(), []);
-
-  // Calculate totals (in dollars for display)
+  // Calculate totals
   const calculations = useMemo(() => {
-    const subtotal = lineItems.reduce((sum, item) => {
-      return sum + (item.quantity * item.unitPrice);
-    }, 0);
+    const subtotal = lineItems.reduce((sum, item) => sum + (item.quantity * item.unitPrice), 0);
     const taxAmount = subtotal * (taxRate / 100);
     const total = Math.max(0, subtotal + taxAmount - discountAmount);
-
-    return {
-      subtotal,
-      taxAmount,
-      discountAmount,
-      total,
-    };
+    return { subtotal, taxAmount, total };
   }, [lineItems, taxRate, discountAmount]);
 
-  // ============ EFFECTS ============
-
-  // Set default due date (30 days from today)
+  // Set default due date
   useEffect(() => {
     if (!dueDate) {
       const defaultDue = new Date();
@@ -162,32 +123,10 @@ const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
     if (preselectedProjectId) setProjectId(preselectedProjectId);
   }, [preselectedClientId, preselectedProjectId]);
 
-  // Auto-select project if client has only one
-  useEffect(() => {
-    if (clientId && clientProjects.length === 1 && !projectId) {
-      setProjectId(clientProjects[0].id);
-    }
-  }, [clientId, clientProjects, projectId]);
-
-  // Debug logging
-  useEffect(() => {
-    console.log('CreateInvoiceModal - Users:', users.length);
-    console.log('CreateInvoiceModal - Clients:', clients.length);
-    console.log('CreateInvoiceModal - Projects:', projects.length);
-    console.log('CreateInvoiceModal - Accessible Projects:', accessibleProjects.length);
-  }, [users, clients, projects, accessibleProjects]);
-
-  // ============ HANDLERS ============
-
   const handleAddLineItem = () => {
     setLineItems((prev) => [
       ...prev,
-      {
-        id: Date.now().toString(),
-        description: '',
-        quantity: 1,
-        unitPrice: 0,
-      },
+      { id: Date.now().toString(), description: '', quantity: 1, unitPrice: 0 },
     ]);
   };
 
@@ -196,16 +135,9 @@ const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
     setLineItems((prev) => prev.filter((item) => item.id !== id));
   };
 
-  const handleLineItemChange = (
-    id: string,
-    field: keyof LineItemForm,
-    value: string | number
-  ) => {
+  const handleLineItemChange = (id: string, field: keyof LineItemForm, value: string | number) => {
     setLineItems((prev) =>
-      prev.map((item) => {
-        if (item.id !== id) return item;
-        return { ...item, [field]: value };
-      })
+      prev.map((item) => (item.id === id ? { ...item, [field]: value } : item))
     );
   };
 
@@ -223,7 +155,7 @@ const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
       return false;
     }
     if (lineItems.every((item) => !item.description.trim())) {
-      setError('Please add at least one line item with a description');
+      setError('Please add at least one line item');
       return false;
     }
     if (calculations.total <= 0) {
@@ -237,73 +169,42 @@ const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
     setError(null);
     setSuccess(false);
 
-    if (!validateForm()) {
-      return;
-    }
+    if (!validateForm()) return;
 
     setLoading(true);
 
     try {
-      // Convert line items to cents for storage
-      const lineItemsInCents: CreateInvoiceLineItem[] = lineItems
-        .filter((item) => item.description.trim())
-        .map((item) => ({
-          description: item.description.trim(),
-          quantity: item.quantity,
-          unitPrice: dollarsToCents(item.unitPrice),
-        }));
-
-      // Build create data
       const createData: CreateInvoiceData = {
         title: title.trim(),
         description: description.trim() || undefined,
         projectId: projectId || undefined,
         clientId,
-        lineItems: lineItemsInCents,
-        taxRate: taxRate / 100, // Convert percentage to decimal
+        lineItems: lineItems
+          .filter((item) => item.description.trim())
+          .map((item) => ({
+            description: item.description.trim(),
+            quantity: item.quantity,
+            unitPrice: dollarsToCents(item.unitPrice),
+          })),
+        taxRate: taxRate / 100,
         discountAmount: dollarsToCents(discountAmount),
         dueDate,
         allowPartialPayments,
         autoPayEnabled: false,
-        acceptedPaymentMethods: enableSquare
-          ? [PaymentMethod.CREDIT_CARD, PaymentMethod.SQUARE]
-          : [PaymentMethod.CHECK, PaymentMethod.BANK_TRANSFER],
+        acceptedPaymentMethods: [PaymentMethod.CHECK, PaymentMethod.BANK_TRANSFER, PaymentMethod.CREDIT_CARD],
         customerNotes: customerNotes.trim() || undefined,
         internalNotes: internalNotes.trim() || undefined,
       };
 
       await onCreateInvoice(createData, publish);
       setSuccess(true);
-      
-      // Close after short delay to show success
-      setTimeout(() => {
-        onClose();
-      }, 1000);
+      setTimeout(onClose, 1000);
     } catch (err: any) {
       setError(err.message || 'Failed to create invoice');
     } finally {
       setLoading(false);
     }
   };
-
-  const resetForm = () => {
-    setTitle('');
-    setDescription('');
-    setClientId(preselectedClientId || '');
-    setProjectId(preselectedProjectId || '');
-    setDueDate('');
-    setTaxRate(0);
-    setDiscountAmount(0);
-    setCustomerNotes('');
-    setInternalNotes('');
-    setAllowPartialPayments(true);
-    setEnableSquare(true);
-    setLineItems([{ id: '1', description: '', quantity: 1, unitPrice: 0 }]);
-    setError(null);
-    setSuccess(false);
-  };
-
-  // ============ RENDER ============
 
   if (!isOpen) return null;
 
@@ -321,10 +222,7 @@ const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
               <p className="text-xs text-gray-500">Generate a new client invoice</p>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-2 hover:bg-gray-100 rounded-xl transition-colors"
-          >
+          <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-xl transition-colors">
             <X size={20} className="text-gray-400" />
           </button>
         </div>
@@ -335,9 +233,7 @@ const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
           {success && (
             <div className="p-4 bg-green-50 border border-green-200 rounded-xl flex items-center gap-3">
               <CheckCircle className="text-green-500" size={20} />
-              <span className="text-sm font-medium text-green-700">
-                Invoice created successfully!
-              </span>
+              <span className="text-sm font-medium text-green-700">Invoice created successfully!</span>
             </div>
           )}
 
@@ -346,15 +242,6 @@ const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
             <div className="p-4 bg-red-50 border border-red-200 rounded-xl flex items-center gap-3">
               <AlertCircle className="text-red-500" size={20} />
               <span className="text-sm font-medium text-red-700">{error}</span>
-            </div>
-          )}
-
-          {/* Debug Info - Remove in production */}
-          {clients.length === 0 && (
-            <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-700">
-              <strong>Debug:</strong> No clients found in users array.
-              Total users: {users.length}.
-              User roles: {users.map(u => u.role).join(', ')}
             </div>
           )}
 
@@ -369,7 +256,7 @@ const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
                 value={clientId}
                 onChange={(e) => {
                   setClientId(e.target.value);
-                  setProjectId(''); // Reset project when client changes
+                  setProjectId('');
                 }}
                 className="w-full pl-10 pr-4 py-3 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-care-orange focus:ring-0 transition-all text-sm font-bold appearance-none cursor-pointer"
               >
@@ -381,6 +268,9 @@ const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
                 ))}
               </select>
             </div>
+            {clients.length === 0 && (
+              <p className="text-xs text-amber-600 mt-1">No clients found. Add clients first.</p>
+            )}
           </div>
 
           {/* Project Selection */}
@@ -394,13 +284,10 @@ const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
                 value={projectId}
                 onChange={(e) => setProjectId(e.target.value)}
                 className="w-full pl-10 pr-4 py-3 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-care-orange focus:ring-0 transition-all text-sm font-bold appearance-none cursor-pointer"
-                disabled={!clientId && clientProjects.length === 0}
               >
                 <option value="">No project linked</option>
                 {(clientId ? clientProjects : accessibleProjects).map((project) => (
-                  <option key={project.id} value={project.id}>
-                    {project.title}
-                  </option>
+                  <option key={project.id} value={project.id}>{project.title}</option>
                 ))}
               </select>
             </div>
@@ -421,20 +308,6 @@ const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
                 className="w-full pl-10 pr-4 py-3 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-care-orange focus:ring-0 transition-all text-sm font-bold"
               />
             </div>
-          </div>
-
-          {/* Description */}
-          <div>
-            <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">
-              Description
-            </label>
-            <textarea
-              rows={2}
-              placeholder="Additional details about this invoice..."
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              className="w-full p-4 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-care-orange focus:ring-0 transition-all text-sm font-medium resize-none"
-            />
           </div>
 
           {/* Due Date */}
@@ -471,11 +344,8 @@ const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
             </div>
 
             <div className="space-y-3">
-              {lineItems.map((item, index) => (
-                <div
-                  key={item.id}
-                  className="p-4 bg-gray-50 rounded-xl border-2 border-gray-100"
-                >
+              {lineItems.map((item) => (
+                <div key={item.id} className="p-4 bg-gray-50 rounded-xl border-2 border-gray-100">
                   <div className="flex gap-3 mb-3">
                     <input
                       type="text"
@@ -592,42 +462,19 @@ const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
             </div>
           </div>
 
-          {/* Payment Options */}
-          <div className="space-y-3">
-            <label className="flex items-center gap-3 p-4 bg-gray-50 rounded-xl cursor-pointer hover:bg-gray-100 transition-colors">
-              <input
-                type="checkbox"
-                checked={allowPartialPayments}
-                onChange={(e) => setAllowPartialPayments(e.target.checked)}
-                className="w-5 h-5 rounded border-gray-300 text-care-orange focus:ring-care-orange"
-              />
-              <div>
-                <p className="text-sm font-bold text-gray-900">Allow Partial Payments</p>
-                <p className="text-xs text-gray-500">Client can make multiple payments</p>
-              </div>
-            </label>
-
-            <label className="flex items-center gap-3 p-4 bg-blue-50 rounded-xl cursor-pointer hover:bg-blue-100 transition-colors border border-blue-100">
-              <input
-                type="checkbox"
-                checked={enableSquare}
-                onChange={(e) => setEnableSquare(e.target.checked)}
-                className="w-5 h-5 rounded border-gray-300 text-care-orange focus:ring-care-orange"
-              />
-              <CreditCard className="text-blue-600" size={20} />
-              <div className="flex-1">
-                <p className="text-sm font-bold text-gray-900">Enable Square Payments</p>
-                <p className="text-xs text-gray-500">
-                  {squareStatus.isConfigured 
-                    ? `Connected (${squareStatus.environment})`
-                    : 'Not configured - add Square credentials to .env'}
-                </p>
-              </div>
-              {squareStatus.isConfigured && (
-                <CheckCircle className="text-green-500" size={16} />
-              )}
-            </label>
-          </div>
+          {/* Partial Payments Toggle */}
+          <label className="flex items-center gap-3 p-4 bg-gray-50 rounded-xl cursor-pointer hover:bg-gray-100 transition-colors">
+            <input
+              type="checkbox"
+              checked={allowPartialPayments}
+              onChange={(e) => setAllowPartialPayments(e.target.checked)}
+              className="w-5 h-5 rounded border-gray-300 text-care-orange focus:ring-care-orange"
+            />
+            <div>
+              <p className="text-sm font-bold text-gray-900">Allow Partial Payments</p>
+              <p className="text-xs text-gray-500">Client can make multiple payments</p>
+            </div>
+          </label>
 
           {/* Customer Notes */}
           <div>
@@ -674,11 +521,7 @@ const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
             disabled={loading}
             className="flex-1 py-3 px-6 border-2 border-gray-200 rounded-xl font-black uppercase tracking-widest text-xs text-gray-600 hover:bg-gray-50 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
           >
-            {loading ? (
-              <Loader2 size={16} className="animate-spin" />
-            ) : (
-              <Save size={14} />
-            )}
+            {loading ? <Loader2 size={16} className="animate-spin" /> : <Save size={14} />}
             Save Draft
           </button>
           <button
@@ -687,11 +530,7 @@ const CreateInvoiceModal: React.FC<CreateInvoiceModalProps> = ({
             disabled={loading}
             className="flex-1 py-3 px-6 bg-care-orange text-white rounded-xl font-black uppercase tracking-widest text-xs hover:shadow-lg hover:shadow-care-orange/20 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
           >
-            {loading ? (
-              <Loader2 size={16} className="animate-spin" />
-            ) : (
-              <Send size={14} />
-            )}
+            {loading ? <Loader2 size={16} className="animate-spin" /> : <Send size={14} />}
             Send Invoice
           </button>
         </div>

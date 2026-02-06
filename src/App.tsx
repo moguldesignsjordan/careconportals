@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from './context/AuthContext';
 import { User, UserRole, Project, Document as ProjectDocument, Message, Milestone } from './types';
-import { Invoice } from './types/invoice';
+import { Invoice, InvoiceStatus, CreateInvoiceData } from './types/invoice';
 import {
   subscribeToProjects,
   subscribeToUsers,
@@ -27,6 +27,16 @@ import {
   CalendarEvent,
 } from './services/db';
 
+// Invoice service imports
+import {
+  subscribeToInvoices,
+  createInvoice,
+  publishInvoice,
+  cancelInvoice,
+  deleteInvoice,
+  updateOverdueInvoices,
+} from './services/invoices';
+
 // Components
 import Sidebar from './components/Sidebar';
 import DashboardAdmin from './components/DashboardAdmin';
@@ -45,6 +55,8 @@ import UsersDirectory from './components/UsersDirectory';
 import SettingsPage from './components/SettingsPage';
 import LoginPage from './components/LoginPage';
 import InvoicesPage from './components/InvoicesPage';
+import CreateInvoiceModal from './components/CreateInvoiceModal';
+import InvoicePaymentPage from './components/InvoicePaymentPage';
 
 // Icons
 import { Loader2, Menu, CheckCircle, XCircle, Info, ArrowLeft, LayoutGrid, Clock } from 'lucide-react';
@@ -59,7 +71,8 @@ type ViewType =
   | 'directory'
   | 'settings'
   | 'calendar'
-  | 'invoices';
+  | 'invoices'
+  | 'invoice-payment';
 
 interface Toast {
   id: string;
@@ -127,12 +140,11 @@ const App: React.FC = () => {
 
     const checkIfReady = () => {
       if (projectsLoaded && usersLoaded) {
-        clearLoadTimeout(); // ✅ stop timeout warning once ready
+        clearLoadTimeout();
         setDataLoading(false);
       }
     };
 
-    // ✅ safety timeout only if callbacks never come back
     timeoutId = window.setTimeout(() => {
       console.warn('⚠️ Loading timeout reached - forcing data load completion');
       setDataLoading(false);
@@ -149,19 +161,11 @@ const App: React.FC = () => {
     });
 
     const unsubUsers = subscribeToUsers((data: any) => {
-      console.log('=== Users Subscription Callback ===');
-      console.log('Users data received:', data);
-      console.log('Is array?', Array.isArray(data));
-      console.log('Length:', data?.length || 0);
-      console.log('===================================');
-
       const arr = Array.isArray(data) ? data : [];
       setUsers(arr);
       usersLoaded = true;
       checkIfReady();
     });
-
-    console.log('Subscriptions set up, waiting for callbacks...');
 
     const unsubDocs = subscribeToDocuments((data: any) => {
       setDocuments(Array.isArray(data) ? data : []);
@@ -175,6 +179,15 @@ const App: React.FC = () => {
       setCalendarEvents(Array.isArray(data) ? data : []);
     });
 
+    // Subscribe to invoices
+    const unsubInvoices = subscribeToInvoices(user, (data: any) => {
+      console.log('Invoices subscription fired:', data?.length || 0, 'invoices');
+      setInvoices(Array.isArray(data) ? data : []);
+    });
+
+    // Check for overdue invoices on load
+    updateOverdueInvoices().catch(console.error);
+
     return () => {
       clearLoadTimeout();
       unsubProjects?.();
@@ -182,19 +195,16 @@ const App: React.FC = () => {
       unsubDocs?.();
       unsubMessages?.();
       unsubCalendar?.();
+      unsubInvoices?.();
 
-      // allow setup again if user changes
       if (didSetupSubsForUid.current === user.id) {
         didSetupSubsForUid.current = null;
       }
     };
-  }, [user?.id]); // ✅ only re-run when uid changes
+  }, [user?.id]);
 
   // Toast helper
-  const showToast = (
-    message: string,
-    type: 'success' | 'error' | 'info' = 'info',
-  ) => {
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
     const id = Math.random().toString(36).substr(2, 9);
     setToasts((prev) => [...prev, { id, message, type }]);
     setTimeout(() => {
@@ -224,16 +234,13 @@ const App: React.FC = () => {
     setCurrentView('projects');
   };
 
-  const handleCreateProject = async (
-    projectData: Omit<Project, 'id' | 'updates' | 'createdAt'>,
-  ) => {
+  const handleCreateProject = async (projectData: Omit<Project, 'id' | 'updates' | 'createdAt'>) => {
     if (!user) return;
     try {
       await createProject(projectData, user.role);
-      const msg =
-        user.role === UserRole.CONTRACTOR
-          ? 'Project submitted for approval!'
-          : 'Project created successfully!';
+      const msg = user.role === UserRole.CONTRACTOR
+        ? 'Project submitted for approval!'
+        : 'Project created successfully!';
       showToast(msg, 'success');
       setShowCreateProject(false);
     } catch (error: any) {
@@ -266,7 +273,7 @@ const App: React.FC = () => {
 
   const handleUploadDocument = async (
     file: File,
-    metadata: Omit<ProjectDocument, 'id' | 'fileUrl' | 'uploadedAt' | 'fileSize'>,
+    metadata: Omit<ProjectDocument, 'id' | 'fileUrl' | 'uploadedAt' | 'fileSize'>
   ) => {
     try {
       await uploadDocument(file, metadata);
@@ -287,11 +294,7 @@ const App: React.FC = () => {
     }
   };
 
-  const handleSendMessage = async (
-    receiverId: string,
-    content: string,
-    projectId?: string,
-  ) => {
+  const handleSendMessage = async (receiverId: string, content: string, projectId?: string) => {
     if (!user) return;
     try {
       await sendMessage(user.id, receiverId, content, projectId);
@@ -301,11 +304,7 @@ const App: React.FC = () => {
     }
   };
 
-  const handleUpdateProjectStatus = async (
-    projectId: string,
-    status: any,
-    progress: number,
-  ) => {
+  const handleUpdateProjectStatus = async (projectId: string, status: any, progress: number) => {
     try {
       await updateProjectStatus(projectId, status, progress);
       showToast('Project updated!', 'success');
@@ -315,19 +314,13 @@ const App: React.FC = () => {
     }
   };
 
-  const handleAddProjectUpdate = async (
-    projectId: string,
-    content: string,
-    imageFile?: File | null
-  ) => {
+  const handleAddProjectUpdate = async (projectId: string, content: string, imageFile?: File | null) => {
     if (!user) return;
     try {
       let imageUrl: string | undefined;
-
       if (imageFile) {
         imageUrl = await uploadProjectUpdateImage(projectId, imageFile);
       }
-
       await addProjectUpdate(projectId, content, user.name, imageUrl);
       showToast('Update posted!', 'success');
     } catch (error: any) {
@@ -337,10 +330,7 @@ const App: React.FC = () => {
   };
 
   // Milestone handlers
-  const handleAddMilestone = async (
-    projectId: string,
-    milestone: Omit<Milestone, 'id' | 'comments'>
-  ) => {
+  const handleAddMilestone = async (projectId: string, milestone: Omit<Milestone, 'id' | 'comments'>) => {
     try {
       await addMilestone(projectId, milestone);
       showToast('Milestone added!', 'success');
@@ -350,11 +340,7 @@ const App: React.FC = () => {
     }
   };
 
-  const handleUpdateMilestone = async (
-    projectId: string,
-    milestoneId: string,
-    updates: Partial<Milestone>
-  ) => {
+  const handleUpdateMilestone = async (projectId: string, milestoneId: string, updates: Partial<Milestone>) => {
     try {
       await updateMilestone(projectId, milestoneId, updates);
       showToast('Milestone updated!', 'success');
@@ -364,10 +350,7 @@ const App: React.FC = () => {
     }
   };
 
-  const handleDeleteMilestone = async (
-    projectId: string,
-    milestoneId: string
-  ) => {
+  const handleDeleteMilestone = async (projectId: string, milestoneId: string) => {
     try {
       await deleteMilestone(projectId, milestoneId);
       showToast('Milestone deleted!', 'success');
@@ -404,13 +387,12 @@ const App: React.FC = () => {
   ): Promise<string> => {
     try {
       const url = await uploadMilestoneImage(projectId, milestoneId, file);
-      // Also add the image to the milestone's imageUrls array
-      const project = projects.find(p => p.id === projectId);
-      const milestone = project?.milestones?.find(m => m.id === milestoneId);
+      const project = projects.find((p) => p.id === projectId);
+      const milestone = project?.milestones?.find((m) => m.id === milestoneId);
       if (milestone) {
         const currentImages = milestone.imageUrls || [];
         await updateMilestone(projectId, milestoneId, {
-          imageUrls: [...currentImages, url]
+          imageUrls: [...currentImages, url],
         });
       }
       showToast('Image uploaded!', 'success');
@@ -428,6 +410,7 @@ const App: React.FC = () => {
     }
     setCurrentView(view as ViewType);
     setSelectedProject(null);
+    setSelectedInvoice(null);
     setSidebarOpen(false);
   };
 
@@ -440,9 +423,7 @@ const App: React.FC = () => {
   };
 
   // Calendar event handlers
-  const handleCreateCalendarEvent = async (
-    eventData: Omit<CalendarEvent, 'id' | 'createdAt'>
-  ) => {
+  const handleCreateCalendarEvent = async (eventData: Omit<CalendarEvent, 'id' | 'createdAt'>) => {
     try {
       await createCalendarEvent(eventData);
       showToast('Event created!', 'success');
@@ -452,10 +433,7 @@ const App: React.FC = () => {
     }
   };
 
-  const handleUpdateCalendarEvent = async (
-    eventId: string,
-    updates: Partial<CalendarEvent>
-  ) => {
+  const handleUpdateCalendarEvent = async (eventId: string, updates: Partial<CalendarEvent>) => {
     try {
       await updateCalendarEvent(eventId, updates);
       showToast('Event updated!', 'success');
@@ -475,11 +453,13 @@ const App: React.FC = () => {
     }
   };
 
-  // Invoice handlers
-  const handleCreateInvoice = async (invoiceData: any) => {
+  // ============ INVOICE HANDLERS ============
+
+  const handleCreateInvoice = async (data: CreateInvoiceData, publish: boolean) => {
+    if (!user) return;
     try {
-      console.log('Creating invoice:', invoiceData);
-      showToast('Invoice created successfully!', 'success');
+      await createInvoice(data, user.id, publish);
+      showToast(publish ? 'Invoice sent!' : 'Invoice saved as draft', 'success');
       setShowCreateInvoice(false);
     } catch (error: any) {
       showToast(error.message || 'Failed to create invoice', 'error');
@@ -489,7 +469,47 @@ const App: React.FC = () => {
 
   const handleViewInvoice = (invoice: Invoice) => {
     setSelectedInvoice(invoice);
-    console.log('Viewing invoice:', invoice);
+    setCurrentView('invoice-payment');
+  };
+
+  const handleSendInvoice = async (invoiceId: string) => {
+    try {
+      await publishInvoice(invoiceId);
+      showToast('Invoice sent!', 'success');
+    } catch (error: any) {
+      showToast(error.message || 'Failed to send invoice', 'error');
+    }
+  };
+
+  const handleCancelInvoice = async (invoiceId: string) => {
+    try {
+      await cancelInvoice(invoiceId);
+      showToast('Invoice cancelled', 'info');
+    } catch (error: any) {
+      showToast(error.message || 'Failed to cancel invoice', 'error');
+    }
+  };
+
+  const handleDeleteInvoice = async (invoiceId: string) => {
+    try {
+      await deleteInvoice(invoiceId);
+      showToast('Invoice deleted', 'info');
+    } catch (error: any) {
+      showToast(error.message || 'Failed to delete invoice', 'error');
+    }
+  };
+
+  const handleRefreshOverdue = async () => {
+    try {
+      const count = await updateOverdueInvoices();
+      if (count > 0) {
+        showToast(`Updated ${count} overdue invoices`, 'info');
+      } else {
+        showToast('All invoices are up to date', 'success');
+      }
+    } catch (error: any) {
+      showToast('Failed to update overdue invoices', 'error');
+    }
   };
 
   // Loading state
@@ -497,10 +517,7 @@ const App: React.FC = () => {
     return (
       <div className="h-screen bg-white flex items-center justify-center">
         <div className="text-center">
-          <Loader2
-            size={48}
-            className="animate-spin text-care-orange mx-auto mb-4"
-          />
+          <Loader2 size={48} className="animate-spin text-care-orange mx-auto mb-4" />
           <p className="text-[#1A1A1A]/60 font-medium">Loading...</p>
         </div>
       </div>
@@ -515,18 +532,44 @@ const App: React.FC = () => {
   // Render current view
   const renderView = () => {
     switch (currentView) {
+      case 'invoice-payment': {
+        // Get the latest invoice data from state
+        const currentInvoice = selectedInvoice
+          ? invoices.find((inv) => inv.id === selectedInvoice.id) || selectedInvoice
+          : null;
+
+        if (!currentInvoice) {
+          setCurrentView('invoices');
+          return null;
+        }
+
+        return (
+          <InvoicePaymentPage
+            invoice={currentInvoice}
+            currentUser={user}
+            users={users}
+            projects={projects}
+            onBack={() => {
+              setSelectedInvoice(null);
+              setCurrentView('invoices');
+            }}
+            onPaymentSuccess={() => {
+              showToast('Payment successful!', 'success');
+            }}
+          />
+        );
+      }
+
       case 'project-details':
       case 'project-timeline': {
         if (!selectedProject) {
           setCurrentView('dashboard');
           return null;
         }
-        const currentProject =
-          projects.find((p) => p.id === selectedProject.id) || selectedProject;
+        const currentProject = projects.find((p) => p.id === selectedProject.id) || selectedProject;
 
         return (
           <div className="space-y-4">
-            {/* View Toggle Header */}
             <div className="flex items-center justify-between">
               <button
                 onClick={handleBackToProjects}
@@ -536,7 +579,6 @@ const App: React.FC = () => {
                 Back to Projects
               </button>
 
-              {/* View Mode Toggle */}
               <div className="flex items-center bg-gray-100 rounded-xl p-1">
                 <button
                   onClick={() => setProjectViewMode('details')}
@@ -563,7 +605,6 @@ const App: React.FC = () => {
               </div>
             </div>
 
-            {/* Render based on view mode */}
             {projectViewMode === 'timeline' ? (
               <ProjectTimeline
                 project={currentProject}
@@ -573,9 +614,7 @@ const App: React.FC = () => {
                 onUpdateMilestone={(milestoneId, updates) =>
                   handleUpdateMilestone(currentProject.id, milestoneId, updates)
                 }
-                onDeleteMilestone={(milestoneId) =>
-                  handleDeleteMilestone(currentProject.id, milestoneId)
-                }
+                onDeleteMilestone={(milestoneId) => handleDeleteMilestone(currentProject.id, milestoneId)}
                 onAddComment={(milestoneId, content, imageFile) =>
                   handleAddMilestoneComment(currentProject.id, milestoneId, content, imageFile)
                 }
@@ -652,10 +691,16 @@ const App: React.FC = () => {
       case 'invoices':
         return (
           <InvoicesPage
-            currentUser={user}
             invoices={invoices}
+            currentUser={user}
+            users={users}
+            projects={projects}
             onCreateInvoice={() => setShowCreateInvoice(true)}
             onViewInvoice={handleViewInvoice}
+            onSendInvoice={handleSendInvoice}
+            onCancelInvoice={handleCancelInvoice}
+            onDeleteInvoice={handleDeleteInvoice}
+            onRefreshOverdue={handleRefreshOverdue}
           />
         );
 
@@ -712,7 +757,7 @@ const App: React.FC = () => {
 
   return (
     <div className="h-screen bg-white flex overflow-hidden">
-      {/* Mobile header - z-30 (below overlay) */}
+      {/* Mobile header */}
       <div className="lg:hidden fixed top-0 left-0 right-0 h-16 bg-white border-b border-gray-100 flex items-center justify-between px-4 z-30">
         <button
           onClick={() => setSidebarOpen(true)}
@@ -724,7 +769,7 @@ const App: React.FC = () => {
         <div className="w-10" />
       </div>
 
-      {/* Mobile overlay - z-40 (above header, below sidebar) */}
+      {/* Mobile overlay */}
       {sidebarOpen && (
         <div
           className="lg:hidden fixed inset-0 bg-black/50 z-40"
@@ -732,7 +777,7 @@ const App: React.FC = () => {
         />
       )}
 
-      {/* Sidebar - z-50 (above everything) */}
+      {/* Sidebar */}
       <Sidebar
         currentUser={user}
         activeTab={currentView}
@@ -741,7 +786,7 @@ const App: React.FC = () => {
         onClose={() => setSidebarOpen(false)}
       />
 
-      {/* Main content area */}
+      {/* Main content */}
       <div className="flex-1 flex flex-col min-w-0 pt-16 lg:pt-0 overflow-y-auto">
         <main className="flex-1 px-4 lg:px-8 py-8">
           {dataLoading ? (
@@ -776,25 +821,19 @@ const App: React.FC = () => {
         onCreate={handleCreateContractor}
       />
 
-      {/* Invoice Modal Placeholder - TODO: Implement CreateInvoiceModal */}
+      {/* Create Invoice Modal */}
       {showCreateInvoice && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl p-6 max-w-md w-full">
-            <h2 className="text-xl font-bold mb-4">Create Invoice</h2>
-            <p className="text-sm text-gray-600 mb-4">
-              Invoice creation modal coming soon! This will integrate with Square for payment processing.
-            </p>
-            <button
-              onClick={() => setShowCreateInvoice(false)}
-              className="px-4 py-2 bg-care-orange text-white rounded-lg hover:bg-orange-600 transition-colors"
-            >
-              Close
-            </button>
-          </div>
-        </div>
+        <CreateInvoiceModal
+          isOpen={showCreateInvoice}
+          onClose={() => setShowCreateInvoice(false)}
+          currentUser={user}
+          users={users}
+          projects={projects}
+          onCreateInvoice={handleCreateInvoice}
+        />
       )}
 
-      {/* Toast notifications – brand colors only */}
+      {/* Toast notifications */}
       <div className="fixed bottom-4 right-4 z-[200] space-y-2">
         {toasts.map((toast) => (
           <div

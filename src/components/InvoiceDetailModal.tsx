@@ -28,7 +28,8 @@ import {
   AlertCircle,
   RefreshCw,
 } from 'lucide-react';
-import { Invoice, InvoiceStatus, PaymentMethod, User as UserType } from '../types';
+import { Invoice, InvoiceStatus, PaymentMethod } from '../types/invoice';
+import { User as UserType } from '../types';
 import { formatCurrency, getInvoiceStatusColor, recordManualPayment, dollarsToCents } from '../services/invoices';
 
 interface InvoiceDetailModalProps {
@@ -312,7 +313,7 @@ const InvoiceDetailModal: React.FC<InvoiceDetailModalProps> = ({
                         </p>
                       )}
                     </div>
-                    <p className="font-bold text-[#111827] ml-4">{formatCurrency(item.amount)}</p>
+                    <p className="font-bold text-[#111827] ml-4">{formatCurrency(item.totalPrice)}</p>
                   </div>
                 ))}
               </div>

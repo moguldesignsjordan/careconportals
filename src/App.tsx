@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from './context/AuthContext';
 import { User, UserRole, Project, Document as ProjectDocument, Message, Milestone } from './types';
 import { Invoice } from './types/invoice';
@@ -96,72 +96,99 @@ const App: React.FC = () => {
   // Toast notifications
   const [toasts, setToasts] = useState<Toast[]>([]);
 
+  // ✅ prevents duplicate subscription setup (StrictMode + rerenders)
+  const didSetupSubsForUid = useRef<string | null>(null);
+
   // Subscribe to data when user is authenticated
   useEffect(() => {
     if (!user) {
       setDataLoading(false);
+      didSetupSubsForUid.current = null;
       return;
     }
 
+    // ✅ do not re-subscribe repeatedly for same user
+    if (didSetupSubsForUid.current === user.id) return;
+    didSetupSubsForUid.current = user.id;
+
     setDataLoading(true);
+
     let projectsLoaded = false;
     let usersLoaded = false;
 
+    let timeoutId: number | null = null;
+
+    const clearLoadTimeout = () => {
+      if (timeoutId != null) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+      }
+    };
+
     const checkIfReady = () => {
       if (projectsLoaded && usersLoaded) {
+        clearLoadTimeout(); // ✅ stop timeout warning once ready
         setDataLoading(false);
       }
     };
 
-    // ✅ SAFETY TIMEOUT: Prevent infinite loading if subscriptions don't fire
-    const loadingTimeout = setTimeout(() => {
+    // ✅ safety timeout only if callbacks never come back
+    timeoutId = window.setTimeout(() => {
       console.warn('⚠️ Loading timeout reached - forcing data load completion');
       setDataLoading(false);
-    }, 5000); // 5 second timeout
+    }, 5000);
 
     console.log('=== Setting up subscriptions ===');
-    
-    const unsubProjects = subscribeToProjects(user, (data) => {
-      console.log('Projects subscription fired:', data.length, 'projects');
-      setProjects(data);
+
+    const unsubProjects = subscribeToProjects(user, (data: any) => {
+      const arr = Array.isArray(data) ? data : [];
+      console.log('Projects subscription fired:', arr.length, 'projects');
+      setProjects(arr);
       projectsLoaded = true;
       checkIfReady();
     });
 
-    const unsubUsers = subscribeToUsers((data) => {
+    const unsubUsers = subscribeToUsers((data: any) => {
       console.log('=== Users Subscription Callback ===');
       console.log('Users data received:', data);
       console.log('Is array?', Array.isArray(data));
       console.log('Length:', data?.length || 0);
       console.log('===================================');
-      setUsers(data);
+
+      const arr = Array.isArray(data) ? data : [];
+      setUsers(arr);
       usersLoaded = true;
       checkIfReady();
     });
 
     console.log('Subscriptions set up, waiting for callbacks...');
 
-    const unsubDocs = subscribeToDocuments((data) => {
-      setDocuments(data);
+    const unsubDocs = subscribeToDocuments((data: any) => {
+      setDocuments(Array.isArray(data) ? data : []);
     });
 
-    const unsubMessages = subscribeToMessages(user.id, (data) => {
-      setMessages(data as Message[]);
+    const unsubMessages = subscribeToMessages(user.id, (data: any) => {
+      setMessages(Array.isArray(data) ? (data as Message[]) : []);
     });
 
-    const unsubCalendar = subscribeToCalendarEvents(user.id, user.role, (data) => {
-      setCalendarEvents(data);
+    const unsubCalendar = subscribeToCalendarEvents(user.id, user.role, (data: any) => {
+      setCalendarEvents(Array.isArray(data) ? data : []);
     });
 
     return () => {
-      clearTimeout(loadingTimeout);
-      unsubProjects();
-      unsubUsers();
-      unsubDocs();
-      unsubMessages();
-      unsubCalendar();
+      clearLoadTimeout();
+      unsubProjects?.();
+      unsubUsers?.();
+      unsubDocs?.();
+      unsubMessages?.();
+      unsubCalendar?.();
+
+      // allow setup again if user changes
+      if (didSetupSubsForUid.current === user.id) {
+        didSetupSubsForUid.current = null;
+      }
     };
-  }, [user]);
+  }, [user?.id]); // ✅ only re-run when uid changes
 
   // Toast helper
   const showToast = (
@@ -451,7 +478,6 @@ const App: React.FC = () => {
   // Invoice handlers
   const handleCreateInvoice = async (invoiceData: any) => {
     try {
-      // TODO: Implement actual invoice creation logic with Firebase/Square
       console.log('Creating invoice:', invoiceData);
       showToast('Invoice created successfully!', 'success');
       setShowCreateInvoice(false);
@@ -497,7 +523,7 @@ const App: React.FC = () => {
         }
         const currentProject =
           projects.find((p) => p.id === selectedProject.id) || selectedProject;
-        
+
         return (
           <div className="space-y-4">
             {/* View Toggle Header */}
@@ -509,7 +535,7 @@ const App: React.FC = () => {
                 <ArrowLeft size={16} />
                 Back to Projects
               </button>
-              
+
               {/* View Mode Toggle */}
               <div className="flex items-center bg-gray-100 rounded-xl p-1">
                 <button
@@ -544,10 +570,10 @@ const App: React.FC = () => {
                 currentUser={user}
                 milestones={currentProject.milestones || []}
                 onAddMilestone={(milestone) => handleAddMilestone(currentProject.id, milestone)}
-                onUpdateMilestone={(milestoneId, updates) => 
+                onUpdateMilestone={(milestoneId, updates) =>
                   handleUpdateMilestone(currentProject.id, milestoneId, updates)
                 }
-                onDeleteMilestone={(milestoneId) => 
+                onDeleteMilestone={(milestoneId) =>
                   handleDeleteMilestone(currentProject.id, milestoneId)
                 }
                 onAddComment={(milestoneId, content, imageFile) =>
@@ -584,7 +610,7 @@ const App: React.FC = () => {
           />
         );
 
-        case 'documents':
+      case 'documents':
         return (
           <DocumentsTab
             documents={documents}
@@ -776,21 +802,9 @@ const App: React.FC = () => {
             className={`
               flex items-center gap-3 px-4 py-3 rounded-xl shadow-lg
               animate-in slide-in-from-right duration-300
-              ${
-                toast.type === 'success'
-                  ? 'bg-care-orange text-white'
-                  : ''
-              }
-              ${
-                toast.type === 'error'
-                  ? 'bg-[#1A1A1A] text-white'
-                  : ''
-              }
-              ${
-                toast.type === 'info'
-                  ? 'bg-white text-[#1A1A1A] border border-care-orange'
-                  : ''
-              }
+              ${toast.type === 'success' ? 'bg-care-orange text-white' : ''}
+              ${toast.type === 'error' ? 'bg-[#1A1A1A] text-white' : ''}
+              ${toast.type === 'info' ? 'bg-white text-[#1A1A1A] border border-care-orange' : ''}
             `}
           >
             {toast.type === 'success' && <CheckCircle size={18} />}

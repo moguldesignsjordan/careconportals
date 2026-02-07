@@ -70,119 +70,150 @@ const CreateClientModal: React.FC<CreateClientModalProps> = ({
     }
   };
 
+  const handleClose = () => {
+    setFormData({ name: '', email: '', phone: '', location: '', bio: '' });
+    setError(null);
+    onClose();
+  };
+
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-[#1A1A1A]/60 backdrop-blur-sm" onClick={onClose}></div>
-      
-      <div className="relative bg-white w-full max-w-md rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200">
-        <div className="bg-green-600 p-6 text-white flex justify-between items-center">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center">
+      {/* Backdrop */}
+      <div
+        className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+        onClick={handleClose}
+      />
+
+      {/* Modal */}
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 overflow-hidden">
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center">
-              <UserPlus size={20} className="text-white" />
+            <div className="h-10 w-10 rounded-xl bg-care-orange/10 flex items-center justify-center">
+              <UserPlus size={20} className="text-care-orange" />
             </div>
             <div>
-              <h2 className="text-xl font-black uppercase tracking-tight">Add New Client</h2>
-              <p className="text-white/70 text-xs font-bold tracking-widest uppercase">Client Information</p>
+              <h2 className="text-lg font-bold text-gray-900">Add Client</h2>
+              <p className="text-xs text-gray-500">Add a new client to your team</p>
             </div>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full transition-colors">
-            <X size={24} />
+          <button
+            onClick={handleClose}
+            className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
+          >
+            <X size={20} className="text-gray-400" />
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-5">
+        {/* Form */}
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
           {error && (
-            <div className="bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-xl text-sm font-medium">
+            <div className="bg-red-50 border border-red-200 text-red-600 text-sm px-4 py-3 rounded-xl">
               {error}
             </div>
           )}
 
+          {/* Name */}
           <div>
-            <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">Full Name *</label>
+            <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-2">
+              Full Name *
+            </label>
             <div className="relative">
-              <UserPlus className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+              <UserPlus size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
               <input
-                required
                 type="text"
-                placeholder="John Smith"
-                className="w-full pl-10 pr-4 py-3 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-green-500 focus:ring-0 transition-all text-sm font-bold"
                 value={formData.name}
-                onChange={e => setFormData({ ...formData, name: e.target.value })}
+                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                placeholder="John Smith"
+                className="w-full pl-10 pr-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-care-orange/20 focus:border-care-orange transition-all"
               />
             </div>
           </div>
 
+          {/* Email */}
           <div>
-            <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">Email Address *</label>
+            <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-2">
+              Email Address *
+            </label>
             <div className="relative">
-              <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+              <Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
               <input
-                required
                 type="email"
-                placeholder="client@example.com"
-                className="w-full pl-10 pr-4 py-3 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-green-500 focus:ring-0 transition-all text-sm font-bold"
                 value={formData.email}
-                onChange={e => setFormData({ ...formData, email: e.target.value })}
+                onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                placeholder="client@example.com"
+                className="w-full pl-10 pr-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-care-orange/20 focus:border-care-orange transition-all"
               />
             </div>
           </div>
 
+          {/* Phone & Location Row */}
           <div className="grid grid-cols-2 gap-4">
+            {/* Phone */}
             <div>
-              <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">Phone</label>
+              <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-2">
+                Phone Number
+              </label>
               <div className="relative">
-                <Phone className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                <Phone size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                 <input
                   type="tel"
-                  placeholder="(555) 123-4567"
-                  className="w-full pl-10 pr-4 py-3 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-green-500 focus:ring-0 transition-all text-sm font-bold"
                   value={formData.phone}
-                  onChange={e => setFormData({ ...formData, phone: e.target.value })}
+                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                  placeholder="(555) 123-4567"
+                  className="w-full pl-10 pr-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-care-orange/20 focus:border-care-orange transition-all"
                 />
               </div>
             </div>
 
+            {/* Location */}
             <div>
-              <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">Location</label>
+              <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-2">
+                Location
+              </label>
               <div className="relative">
-                <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                <MapPin size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
                 <input
                   type="text"
-                  placeholder="City, State"
-                  className="w-full pl-10 pr-4 py-3 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-green-500 focus:ring-0 transition-all text-sm font-bold"
                   value={formData.location}
-                  onChange={e => setFormData({ ...formData, location: e.target.value })}
+                  onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+                  placeholder="City, State"
+                  className="w-full pl-10 pr-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-care-orange/20 focus:border-care-orange transition-all"
                 />
               </div>
             </div>
           </div>
 
+          {/* Notes */}
           <div>
-            <label className="block text-xs font-black text-gray-400 uppercase tracking-widest mb-2">Notes</label>
+            <label className="block text-xs font-semibold text-gray-700 uppercase tracking-wider mb-2">
+              Notes
+            </label>
             <div className="relative">
-              <FileText className="absolute left-3 top-3 text-gray-400" size={18} />
+              <FileText size={16} className="absolute left-3 top-3 text-gray-400" />
               <textarea
                 rows={2}
-                placeholder="Additional notes about the client..."
-                className="w-full pl-10 pr-4 py-3 bg-gray-50 border-2 border-gray-100 rounded-xl focus:border-green-500 focus:ring-0 transition-all text-sm font-medium resize-none"
                 value={formData.bio}
-                onChange={e => setFormData({ ...formData, bio: e.target.value })}
+                onChange={(e) => setFormData({ ...formData, bio: e.target.value })}
+                placeholder="Additional notes about the client..."
+                className="w-full pl-10 pr-4 py-3 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-care-orange/20 focus:border-care-orange transition-all resize-none"
               />
             </div>
           </div>
 
-          <div className="flex gap-3 pt-2">
+          {/* Actions */}
+          <div className="flex gap-3 pt-4">
             <button
               type="button"
-              onClick={onClose}
-              className="flex-1 py-3 px-6 border-2 border-gray-200 rounded-xl font-black uppercase tracking-widest text-xs text-gray-600 hover:bg-gray-50 transition-all"
+              onClick={handleClose}
+              className="flex-1 px-4 py-3 border border-gray-200 text-gray-700 rounded-xl text-sm font-semibold hover:bg-gray-50 transition-colors"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={loading}
-              className="flex-1 py-3 px-6 bg-green-600 text-white rounded-xl font-black uppercase tracking-widest text-xs hover:shadow-lg hover:shadow-green-600/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              className="flex-1 px-4 py-3 bg-care-orange text-white rounded-xl text-sm font-semibold hover:bg-orange-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
               {loading ? (
                 <>

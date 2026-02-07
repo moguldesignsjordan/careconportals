@@ -263,7 +263,7 @@ const LoginPage: React.FC = () => {
               Your projects, all in one place.
             </h1>
             <p className="text-sm text-white/70 mb-6">
-              CareCon keeps your site updates, communication, and approvals organized so
+              CareGenCon keeps your site updates, communication, and approvals organized so
               your team and clients stay aligned from kickoff to handover.
             </p>
 

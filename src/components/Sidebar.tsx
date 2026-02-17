@@ -10,6 +10,7 @@ import {
   LogOut,
   X,
   Receipt, // Added for invoices
+  Calculator, // Added for budget
 } from 'lucide-react';
 import { Logo } from '../constants';
 
@@ -46,6 +47,12 @@ const Sidebar: React.FC<SidebarProps> = ({
       label: 'Invoices',
       icon: Receipt,
       roles: [UserRole.ADMIN, UserRole.CONTRACTOR, UserRole.CLIENT],
+    },
+    {
+      id: 'budget',
+      label: 'Budget',
+      icon: Calculator,
+      roles: [UserRole.ADMIN],
     },
     {
       id: 'calendar',

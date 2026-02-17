@@ -351,3 +351,6 @@ export const checkPaymentStatus = functions.https.onCall(
     }
   }
 );
+
+// ============ NOTIFICATION EMAIL FUNCTIONS ============
+export {sendNotificationEmail, sendDailyDigest} from "./notificationEmail";

@@ -46,7 +46,7 @@ const Sidebar: React.FC<SidebarProps> = ({
       id: 'invoices', // ✅ NEW: Invoices menu item
       label: 'Invoices',
       icon: Receipt,
-      roles: [UserRole.ADMIN, UserRole.CONTRACTOR, UserRole.CLIENT],
+      roles: [UserRole.ADMIN, UserRole.CLIENT],
     },
     {
       id: 'budget',

@@ -505,7 +505,7 @@ const App: React.FC = () => {
       if (user && eventData.attendeeIds?.length) {
         notifyEventCreated(
           eventData.title,
-          eventData.startDate || eventData.date || '',
+          eventData.date || '',
           user,
           eventData.attendeeIds
         ).catch(console.error);

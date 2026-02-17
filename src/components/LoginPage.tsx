@@ -11,15 +11,18 @@ import {
   HardHat,
   UserCircle,
   AlertCircle,
+  ArrowLeft,
+  CheckCircle,
 } from 'lucide-react';
 
 const LoginPage: React.FC = () => {
-  const { loginWithGoogle, loginWithEmail, signupWithEmail } = useAuth();
+  const { loginWithGoogle, loginWithEmail, signupWithEmail, resetPassword } = useAuth();
 
-  const [mode, setMode] = useState<'login' | 'signup' | 'role-select'>('login');
+  const [mode, setMode] = useState<'login' | 'signup' | 'role-select' | 'forgot-password'>('login');
   const [selectedRole, setSelectedRole] = useState<UserRole>(UserRole.CLIENT);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [resetSuccess, setResetSuccess] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
   const [formData, setFormData] = useState({
@@ -77,6 +80,30 @@ const LoginPage: React.FC = () => {
     }
   };
 
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setResetSuccess(false);
+    setLoading(true);
+    try {
+      await resetPassword(formData.email);
+      setResetSuccess(true);
+    } catch (err: any) {
+      const code = err?.code || '';
+      if (code === 'auth/user-not-found') {
+        setError('No account found with this email address.');
+      } else if (code === 'auth/invalid-email') {
+        setError('Please enter a valid email address.');
+      } else if (code === 'auth/too-many-requests') {
+        setError('Too many attempts. Please wait a few minutes and try again.');
+      } else {
+        setError(err.message || 'Failed to send reset email. Please try again.');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // ✅ Only brand colors: care-orange, peach, dark gray/black, white
   const roles = [
     {
@@ -98,6 +125,126 @@ const LoginPage: React.FC = () => {
       border: 'border-gray-200 hover:border-care-orange/60',
     },
   ];
+
+  // FORGOT PASSWORD SCREEN
+  if (mode === 'forgot-password') {
+    return (
+      <div className="min-h-screen bg-white flex items-center justify-center px-4 py-8">
+        <div className="max-w-md w-full bg-white rounded-3xl shadow-2xl border border-gray-100 overflow-hidden">
+          <div className="bg-[#1A1A1A] px-8 py-6">
+            <div className="flex items-center gap-2 mb-4">
+              <img src="/care.png" alt="CareCon" className="h-7" />
+              <div className="flex flex-col leading-tight">
+                <span className="text-[11px] font-semibold text-white/60 uppercase tracking-[0.18em]">
+                  CAREGENCON
+                </span>
+                <span className="text-sm font-semibold text-white">Operations</span>
+              </div>
+            </div>
+            <h2 className="text-xl font-black text-white">Reset your password</h2>
+            <p className="text-sm text-white/70 mt-1">
+              Enter your email and we'll send you a link to reset your password.
+            </p>
+          </div>
+
+          <div className="p-6 lg:p-8 bg-[#FDEEE9]">
+            {resetSuccess ? (
+              <div className="text-center py-4">
+                <div className="w-14 h-14 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-4">
+                  <CheckCircle size={28} className="text-green-600" />
+                </div>
+                <h3 className="text-lg font-bold text-gray-900 mb-2">Check your email</h3>
+                <p className="text-sm text-gray-600 mb-1">
+                  We've sent a password reset link to:
+                </p>
+                <p className="text-sm font-semibold text-care-orange mb-6">
+                  {formData.email}
+                </p>
+                <p className="text-xs text-gray-500 mb-6">
+                  Didn't receive it? Check your spam folder or try again in a few minutes.
+                </p>
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setResetSuccess(false);
+                      setMode('login');
+                      setError(null);
+                    }}
+                    className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-care-orange text-white text-xs font-bold px-4 py-2.5 shadow-sm shadow-care-orange/40 hover:shadow-md hover:bg-care-orange/90 transition-all"
+                  >
+                    Back to sign in
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setResetSuccess(false);
+                      setError(null);
+                    }}
+                    className="w-full text-xs text-gray-500 hover:text-care-orange font-medium py-2 transition-colors"
+                  >
+                    Send another link
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                {error && (
+                  <div className="mb-4 flex items-center gap-2 rounded-xl bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-700">
+                    <AlertCircle size={14} />
+                    <span>{error}</span>
+                  </div>
+                )}
+
+                <form onSubmit={handleForgotPassword} className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-medium text-gray-600 mb-1.5">
+                      Email address
+                    </label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
+                        <Mail size={16} />
+                      </span>
+                      <input
+                        type="email"
+                        required
+                        value={formData.email}
+                        onChange={(e) => handleInputChange('email', e.target.value)}
+                        className="w-full pl-9 pr-3 py-2.5 text-sm rounded-xl border border-gray-200 bg-white focus:border-care-orange focus:ring-0"
+                        placeholder="you@example.com"
+                        autoFocus
+                      />
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={loading || !formData.email.trim()}
+                    className="w-full inline-flex items-center justify-center gap-2 rounded-xl bg-care-orange text-white text-xs font-bold px-4 py-2.5 shadow-sm shadow-care-orange/40 hover:shadow-md hover:bg-care-orange/90 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+                  >
+                    {loading && <Loader2 size={16} className="animate-spin" />}
+                    <span>Send reset link</span>
+                  </button>
+                </form>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode('login');
+                    setError(null);
+                  }}
+                  className="w-full mt-4 flex items-center justify-center gap-1.5 text-xs text-gray-500 hover:text-care-orange font-medium transition-colors"
+                >
+                  <ArrowLeft size={14} />
+                  Back to sign in
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // ROLE SELECT SCREEN (for Google sign-in)
   if (mode === 'role-select') {
@@ -430,6 +577,21 @@ const LoginPage: React.FC = () => {
                   Minimum 6 characters. Use a mix of letters and numbers.
                 </p>
               )}
+              {mode === 'login' && (
+                <div className="mt-1.5 text-right">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setError(null);
+                      setResetSuccess(false);
+                      setMode('forgot-password');
+                    }}
+                    className="text-[11px] text-care-orange font-semibold hover:underline"
+                  >
+                    Forgot password?
+                  </button>
+                </div>
+              )}
             </div>
 
             {mode === 'signup' && (
@@ -549,4 +711,3 @@ const LoginPage: React.FC = () => {
 };
 
 export default LoginPage;
- 

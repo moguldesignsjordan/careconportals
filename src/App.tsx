@@ -37,6 +37,21 @@ import {
   updateOverdueInvoices,
 } from './services/invoices';
 
+// Notification imports
+import { AppNotification } from './types/notification';
+import {
+  subscribeToNotifications,
+  notifyProjectCreated,
+  notifyProjectStatusChanged,
+  notifyProjectUpdate,
+  notifyMessageReceived,
+  notifyInvoiceSent,
+  notifyDocumentUploaded,
+  notifyMilestoneCompleted,
+  notifyEventCreated,
+} from './services/notifications';
+import NotificationBell from './components/NotificationBell';
+
 // Components
 import Sidebar from './components/Sidebar';
 import DashboardAdmin from './components/DashboardAdmin';
@@ -57,6 +72,7 @@ import LoginPage from './components/LoginPage';
 import InvoicesPage from './components/InvoicesPage';
 import CreateInvoiceModal from './components/CreateInvoiceModal';
 import InvoicePaymentPage from './components/InvoicePaymentPage';
+import BudgetCalculator from './components/BudgetCalculator';
 
 // Icons
 import { Loader2, Menu, CheckCircle, XCircle, Info, ArrowLeft, LayoutGrid, Clock } from 'lucide-react';
@@ -72,7 +88,8 @@ type ViewType =
   | 'settings'
   | 'calendar'
   | 'invoices'
-  | 'invoice-payment';
+  | 'invoice-payment'
+  | 'budget';
 
 interface Toast {
   id: string;
@@ -90,6 +107,7 @@ const App: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [dataLoading, setDataLoading] = useState(true);
 
   // UI state
@@ -185,6 +203,11 @@ const App: React.FC = () => {
       setInvoices(Array.isArray(data) ? data : []);
     });
 
+    // Subscribe to notifications
+    const unsubNotifications = subscribeToNotifications(user.id, (data) => {
+      setNotifications(Array.isArray(data) ? data : []);
+    });
+
     // Check for overdue invoices on load
     updateOverdueInvoices().catch(console.error);
 
@@ -196,6 +219,7 @@ const App: React.FC = () => {
       unsubMessages?.();
       unsubCalendar?.();
       unsubInvoices?.();
+      unsubNotifications?.();
 
       if (didSetupSubsForUid.current === user.id) {
         didSetupSubsForUid.current = null;
@@ -237,12 +261,19 @@ const App: React.FC = () => {
   const handleCreateProject = async (projectData: Omit<Project, 'id' | 'updates' | 'createdAt'>) => {
     if (!user) return;
     try {
-      await createProject(projectData, user.role);
+      const docRef = await createProject(projectData, user.role);
       const msg = user.role === UserRole.CONTRACTOR
         ? 'Project submitted for approval!'
         : 'Project created successfully!';
       showToast(msg, 'success');
       setShowCreateProject(false);
+
+      // Notify assigned users
+      notifyProjectCreated(
+        { ...projectData, id: typeof docRef === 'object' && docRef?.id ? docRef.id : '', updates: [] } as Project,
+        user,
+        users
+      ).catch(console.error);
     } catch (error: any) {
       showToast(error.message || 'Failed to create project', 'error');
       throw error;
@@ -278,6 +309,24 @@ const App: React.FC = () => {
     try {
       await uploadDocument(file, metadata);
       showToast('Document uploaded successfully!', 'success');
+
+      // Notify project members about the new document
+      if (metadata.projectId && user) {
+        const project = projects.find((p) => p.id === metadata.projectId);
+        if (project) {
+          const recipientIds = [
+            ...(project.clientIds || [project.clientId]),
+            ...(project.contractorIds || [project.contractorId]),
+          ].filter(Boolean);
+          notifyDocumentUploaded(
+            metadata.title,
+            project.title,
+            project.id,
+            user,
+            recipientIds
+          ).catch(console.error);
+        }
+      }
     } catch (error: any) {
       showToast(error.message || 'Failed to upload document', 'error');
       throw error;
@@ -298,6 +347,9 @@ const App: React.FC = () => {
     if (!user) return;
     try {
       await sendMessage(user.id, receiverId, content, projectId);
+
+      // Notify the recipient
+      notifyMessageReceived(receiverId, user, content, projectId).catch(console.error);
     } catch (error: any) {
       showToast(error.message || 'Failed to send message', 'error');
       throw error;
@@ -308,6 +360,12 @@ const App: React.FC = () => {
     try {
       await updateProjectStatus(projectId, status, progress);
       showToast('Project updated!', 'success');
+
+      // Notify project stakeholders
+      const project = projects.find((p) => p.id === projectId);
+      if (project && user) {
+        notifyProjectStatusChanged(project, status, user, users).catch(console.error);
+      }
     } catch (error: any) {
       showToast(error.message || 'Failed to update project', 'error');
       throw error;
@@ -323,6 +381,12 @@ const App: React.FC = () => {
       }
       await addProjectUpdate(projectId, content, user.name, imageUrl);
       showToast('Update posted!', 'success');
+
+      // Notify project stakeholders
+      const project = projects.find((p) => p.id === projectId);
+      if (project) {
+        notifyProjectUpdate(project, content, user, users).catch(console.error);
+      }
     } catch (error: any) {
       showToast(error.message || 'Failed to post update', 'error');
       throw error;
@@ -344,6 +408,15 @@ const App: React.FC = () => {
     try {
       await updateMilestone(projectId, milestoneId, updates);
       showToast('Milestone updated!', 'success');
+
+      // Notify when a milestone is marked completed
+      if (updates.status === 'completed' && user) {
+        const project = projects.find((p) => p.id === projectId);
+        const milestone = project?.milestones?.find((m) => m.id === milestoneId);
+        if (project && milestone) {
+          notifyMilestoneCompleted(project, milestone.title, user).catch(console.error);
+        }
+      }
     } catch (error: any) {
       showToast(error.message || 'Failed to update milestone', 'error');
       throw error;
@@ -427,6 +500,16 @@ const App: React.FC = () => {
     try {
       await createCalendarEvent(eventData);
       showToast('Event created!', 'success');
+
+      // Notify attendees
+      if (user && eventData.attendeeIds?.length) {
+        notifyEventCreated(
+          eventData.title,
+          eventData.startDate || eventData.date || '',
+          user,
+          eventData.attendeeIds
+        ).catch(console.error);
+      }
     } catch (error: any) {
       showToast(error.message || 'Failed to create event', 'error');
       throw error;
@@ -476,6 +559,24 @@ const App: React.FC = () => {
     try {
       await publishInvoice(invoiceId);
       showToast('Invoice sent!', 'success');
+
+      // Notify the client about the invoice
+      if (user) {
+        const invoice = invoices.find((inv) => inv.id === invoiceId);
+        if (invoice) {
+          const clientId = invoice.clientId || (invoice.clientIds?.[0]);
+          if (clientId) {
+            const { formatCurrency } = await import('./services/invoices');
+            notifyInvoiceSent(
+              invoice.invoiceNumber || invoiceId,
+              invoiceId,
+              formatCurrency(invoice.totalAmount || 0),
+              clientId,
+              user
+            ).catch(console.error);
+          }
+        }
+      }
     } catch (error: any) {
       showToast(error.message || 'Failed to send invoice', 'error');
     }
@@ -704,6 +805,15 @@ const App: React.FC = () => {
           />
         );
 
+      case 'budget':
+        return (
+          <BudgetCalculator
+            projects={projects}
+            users={users}
+            currentUser={user}
+          />
+        );
+
       case 'projects':
         return (
           <ProjectsHub
@@ -765,7 +875,18 @@ const App: React.FC = () => {
           <Menu size={24} />
         </button>
         <img src="/care.png" alt="Care Construction" className="h-8" />
-        <div className="w-10" />
+        <NotificationBell
+          notifications={notifications}
+          currentUserId={user.id}
+          onNavigate={(view, entityId) => {
+            if (view === 'project-details' && entityId) {
+              const project = projects.find((p) => p.id === entityId);
+              if (project) handleSelectProject(project);
+            } else {
+              handleNavigate(view);
+            }
+          }}
+        />
       </div>
 
       {/* Mobile overlay */}
@@ -787,6 +908,30 @@ const App: React.FC = () => {
 
       {/* Main content */}
       <div className="flex-1 flex flex-col min-w-0 pt-16 lg:pt-0 overflow-y-auto">
+        {/* Desktop top bar with notification bell */}
+        <div className="hidden lg:flex items-center justify-end gap-2 px-8 py-3 border-b border-gray-100 bg-white sticky top-0 z-20">
+          <NotificationBell
+            notifications={notifications}
+            currentUserId={user.id}
+            onNavigate={(view, entityId) => {
+              if (view === 'project-details' && entityId) {
+                const project = projects.find((p) => p.id === entityId);
+                if (project) handleSelectProject(project);
+              } else {
+                handleNavigate(view);
+              }
+            }}
+          />
+          <div className="flex items-center gap-2 pl-3 ml-3 border-l border-gray-100">
+            <div className="h-8 w-8 rounded-full bg-care-orange/10 flex items-center justify-center">
+              <span className="text-xs font-semibold text-care-orange">
+                {user.name?.[0]?.toUpperCase() || '?'}
+              </span>
+            </div>
+            <span className="text-xs font-medium text-gray-700">{user.name}</span>
+          </div>
+        </div>
+
         <main className="flex-1 px-4 lg:px-8 py-8">
           {dataLoading ? (
             <div className="flex items-center justify-center py-20">

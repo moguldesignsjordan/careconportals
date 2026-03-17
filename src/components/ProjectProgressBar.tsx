@@ -42,7 +42,7 @@ interface ProjectProgressBarProps {
 // ── Animated counter ────────────────────────────────────────────────
 const AnimatedPercent: React.FC<{ value: number }> = ({ value }) => {
   const [display, setDisplay] = useState(0);
-  const rafRef = useRef<number>();
+  const rafRef = useRef<number | undefined>(undefined);
 
   useEffect(() => {
     const start = display;
@@ -102,16 +102,15 @@ const PhaseNode: React.FC<{
 
       {/* Node circle */}
       <div
-        className={`relative z-10 rounded-xl flex items-center justify-center transition-all duration-300
+        className={`relative z-10 flex items-center justify-center rounded-full border-2 transition-all duration-300 group-hover:scale-110
           ${isDone
-            ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/20'
+            ? 'bg-emerald-500 border-emerald-500 text-white'
             : isActive
-              ? 'bg-care-orange text-white shadow-lg shadow-care-orange/25 scale-110'
+              ? 'bg-care-orange border-care-orange text-white shadow-lg shadow-care-orange/20'
               : hasProgress
-                ? 'bg-care-orange/10 text-care-orange'
-                : 'bg-gray-100 text-gray-400'
+                ? 'bg-care-orange/10 border-care-orange text-care-orange'
+                : 'bg-white border-gray-200 text-gray-300'
           }
-          ${isActive ? 'ring-[3px] ring-care-orange/20' : ''}
         `}
         style={{ width: size, height: size }}
       >
@@ -165,7 +164,7 @@ const ProjectProgressBar: React.FC<ProjectProgressBarProps> = ({
     if (currentPhase && !activePhase) {
       setActivePhase(currentPhase.id);
     }
-  }, [currentPhase]);
+  }, [currentPhase, activePhase]);
 
   // ── Compact mode (for project cards) ────────────────────────────
   if (compact) {
@@ -271,9 +270,8 @@ const ProjectProgressBar: React.FC<ProjectProgressBarProps> = ({
               className="text-center"
               style={{ flex: p.weight }}
             >
-              <span className={`text-[8px] font-semibold ${
-                p.phaseCompletion === 100 ? 'text-emerald-400' : 'text-gray-300'
-              }`}>
+              <span className={`text-[8px] font-semibold ${p.phaseCompletion === 100 ? 'text-emerald-400' : 'text-gray-300'
+                }`}>
                 {p.label}
               </span>
             </div>
@@ -319,20 +317,18 @@ const ProjectProgressBar: React.FC<ProjectProgressBarProps> = ({
                 return (
                   <div
                     key={p.id}
-                    className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors cursor-pointer ${
-                      activePhase === p.id
-                        ? 'bg-care-orange/5 border border-care-orange/10'
-                        : 'hover:bg-gray-50'
-                    }`}
+                    className={`flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors cursor-pointer ${activePhase === p.id
+                      ? 'bg-care-orange/5 border border-care-orange/10'
+                      : 'hover:bg-gray-50'
+                      }`}
                     onClick={() => setActivePhase(p.id as PhaseId)}
                   >
-                    <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${
-                      p.phaseCompletion === 100
-                        ? 'bg-emerald-100 text-emerald-600'
-                        : p.phaseCompletion > 0
-                          ? 'bg-care-orange/10 text-care-orange'
-                          : 'bg-gray-100 text-gray-400'
-                    }`}>
+                    <div className={`w-7 h-7 rounded-lg flex items-center justify-center ${p.phaseCompletion === 100
+                      ? 'bg-emerald-100 text-emerald-600'
+                      : p.phaseCompletion > 0
+                        ? 'bg-care-orange/10 text-care-orange'
+                        : 'bg-gray-100 text-gray-400'
+                      }`}>
                       <PhaseIcon size={14} />
                     </div>
 

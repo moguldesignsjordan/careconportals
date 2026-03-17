@@ -26,12 +26,12 @@ export const MOCK_DOCUMENTS: Document[] = [
 export const Logo = ({ light = false, compact = false }: { light?: boolean, compact?: boolean }) => (
   <div className="flex items-center gap-4">
     {/* UPDATED: Using care.png from public folder instead of SVG */}
-    <img 
-      src="/care.png" 
-      alt="Care General Construction" 
+    <img
+      src="/care.png"
+      alt="Care General Construction"
       className={`${compact ? 'w-20 h-20' : 'w-20 h-20'} object-contain`}
     />
-    
+
 
   </div>
 );

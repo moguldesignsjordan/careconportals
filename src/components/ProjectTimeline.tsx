@@ -13,6 +13,7 @@ import {
   Trash2,
   Edit3,
   Loader2,
+  GripVertical,
 } from 'lucide-react';
 import { Project, User as UserType, Milestone } from '../types';
 
@@ -66,6 +67,10 @@ const ProjectTimeline: React.FC<ProjectTimelineProps> = ({
   const [editingPhaseId, setEditingPhaseId] = useState<string | null>(null);
   const [phaseLabelDraft, setPhaseLabelDraft] = useState('');
 
+  // Drag and drop state
+  const [draggedPhase, setDraggedPhase] = useState<string | null>(null);
+  const [dragOverPhase, setDragOverPhase] = useState<string | null>(null);
+
   // Milestone creation
   const [showAddMilestone, setShowAddMilestone] = useState<string | null>(null);
   const [newMilestone, setNewMilestone] = useState({
@@ -113,6 +118,77 @@ const ProjectTimeline: React.FC<ProjectTimelineProps> = ({
       else next.add(phaseId);
       return next;
     });
+  };
+
+  // ---- Drag and Drop Handlers ----
+
+  const handleDragStart = (e: React.DragEvent, phaseId: string) => {
+    setDraggedPhase(phaseId);
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', phaseId);
+    // Add a slight delay to show the dragging state
+    setTimeout(() => {
+      const element = e.target as HTMLElement;
+      element.style.opacity = '0.5';
+    }, 0);
+  };
+
+  const handleDragOver = (e: React.DragEvent, phaseId: string) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    if (draggedPhase && draggedPhase !== phaseId) {
+      setDragOverPhase(phaseId);
+    }
+  };
+
+  const handleDragEnter = (e: React.DragEvent, phaseId: string) => {
+    e.preventDefault();
+    if (draggedPhase && draggedPhase !== phaseId) {
+      setDragOverPhase(phaseId);
+    }
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    // Only clear if we're leaving the container entirely
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const x = e.clientX;
+    const y = e.clientY;
+    if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) {
+      setDragOverPhase(null);
+    }
+  };
+
+  const handleDrop = (e: React.DragEvent, targetPhaseId: string) => {
+    e.preventDefault();
+    if (!draggedPhase || draggedPhase === targetPhaseId) {
+      setDraggedPhase(null);
+      setDragOverPhase(null);
+      return;
+    }
+
+    setCustomPhases((prev) => {
+      const newPhases = [...prev];
+      const draggedIndex = newPhases.findIndex((p) => p.id === draggedPhase);
+      const targetIndex = newPhases.findIndex((p) => p.id === targetPhaseId);
+
+      if (draggedIndex === -1 || targetIndex === -1) return prev;
+
+      // Remove dragged item and insert at target position
+      const [removed] = newPhases.splice(draggedIndex, 1);
+      newPhases.splice(targetIndex, 0, removed);
+
+      return newPhases;
+    });
+
+    setDraggedPhase(null);
+    setDragOverPhase(null);
+  };
+
+  const handleDragEnd = (e: React.DragEvent) => {
+    (e.target as HTMLElement).style.opacity = '1';
+    setDraggedPhase(null);
+    setDragOverPhase(null);
   };
 
   // Phase label editing
@@ -188,7 +264,6 @@ const ProjectTimeline: React.FC<ProjectTimelineProps> = ({
     setAddingMilestone(true);
     try {
       await onAddMilestone({
-        // Cast phaseId to Milestone['phaseId'] to resolve the TS2322 error
         phaseId: phaseId as Milestone['phaseId'],
         title: newMilestone.title,
         description: newMilestone.description || '',
@@ -318,24 +393,55 @@ const ProjectTimeline: React.FC<ProjectTimelineProps> = ({
           const isExpanded = expandedPhases.has(phase.id);
           const phaseMilestones = getPhaseMilestones(phase.id);
           const progressPercent = stats.total > 0 ? (stats.completed / stats.total) * 100 : 0;
+          const isDragging = draggedPhase === phase.id;
+          const isDragOver = dragOverPhase === phase.id;
 
           return (
-            <div key={phase.id}>
+            <div
+              key={phase.id}
+              draggable
+              onDragStart={(e) => handleDragStart(e, phase.id)}
+              onDragOver={(e) => handleDragOver(e, phase.id)}
+              onDragEnter={(e) => handleDragEnter(e, phase.id)}
+              onDragLeave={handleDragLeave}
+              onDrop={(e) => handleDrop(e, phase.id)}
+              onDragEnd={handleDragEnd}
+              className={`transition-all duration-200 ${isDragging ? 'opacity-50 scale-[0.98]' : 'opacity-100'
+                }`}
+            >
+              {/* Drop indicator line */}
+              {isDragOver && (
+                <div className="h-1 bg-[#F15A2B] rounded-full mb-2 animate-pulse shadow-lg shadow-orange-200" />
+              )}
+
               {/* Phase Card */}
-              <div className="bg-white rounded-xl border border-neutral-200 overflow-hidden">
+              <div
+                className={`bg-white rounded-xl border overflow-hidden transition-all duration-200 ${isDragOver
+                  ? 'border-[#F15A2B] border-2 shadow-lg shadow-orange-100'
+                  : 'border-neutral-200'
+                  } ${isDragging ? 'shadow-2xl' : ''}`}
+              >
                 {/* Phase Header */}
-                <button
-                  onClick={() => togglePhase(phase.id)}
-                  className="w-full px-4 sm:px-5 py-3 sm:py-4 flex items-center justify-between hover:bg-neutral-50 transition-colors group"
-                >
-                  <div className="flex items-center gap-3 sm:gap-4">
+                <div className="w-full px-4 sm:px-5 py-3 sm:py-4 flex items-center justify-between hover:bg-neutral-50 transition-colors group">
+                  <div className="flex items-center gap-3 sm:gap-4 flex-1">
+                    {/* Drag Handle */}
+                    <div
+                      className="cursor-grab active:cursor-grabbing text-neutral-300 hover:text-neutral-500 transition-colors p-1 -ml-1"
+                      title="Drag to reorder"
+                    >
+                      <GripVertical size={18} />
+                    </div>
+
                     {/* Phase Number - Orange accent */}
                     <div className="w-7 h-7 sm:w-8 sm:h-8 rounded-lg bg-[#F15A2B] flex items-center justify-center text-sm font-semibold text-white flex-shrink-0">
                       {phaseIndex + 1}
                     </div>
 
                     {/* Phase Info */}
-                    <div className="text-left min-w-0">
+                    <button
+                      onClick={() => togglePhase(phase.id)}
+                      className="text-left min-w-0 flex-1"
+                    >
                       {editingPhaseId === phase.id ? (
                         <input
                           type="text"
@@ -343,64 +449,67 @@ const ProjectTimeline: React.FC<ProjectTimelineProps> = ({
                           onChange={(e) => setPhaseLabelDraft(e.target.value)}
                           onBlur={commitPhaseLabel}
                           onKeyDown={handlePhaseLabelKeyDown}
-                          onClick={(e) => e.stopPropagation()}
-                          className="text-base sm:text-lg font-semibold bg-neutral-100 border border-neutral-300 rounded-lg px-2 sm:px-3 py-1 focus:outline-none focus:ring-2 focus:ring-[#F15A2B] w-full max-w-[200px]"
                           autoFocus
+                          className="text-sm sm:text-base font-semibold text-neutral-900 bg-transparent border-b border-[#F15A2B] outline-none w-full"
+                          onClick={(e) => e.stopPropagation()}
                         />
                       ) : (
                         <div className="flex items-center gap-2">
-                          <h2 className="text-base sm:text-lg font-semibold text-neutral-900 truncate">
+                          <h3 className="text-sm sm:text-base font-semibold text-neutral-900 truncate">
                             {phaseLabels[phase.id] || phase.label}
-                          </h2>
+                          </h3>
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
                               startEditingPhaseLabel(phase.id);
                             }}
-                            className="p-1 rounded hover:bg-neutral-200 transition-colors opacity-0 group-hover:opacity-100 hidden sm:block"
+                            className="p-1 rounded hover:bg-neutral-100 text-neutral-400 hover:text-neutral-600 opacity-0 group-hover:opacity-100 transition-all"
                           >
-                            <Edit3 size={12} className="text-neutral-500" />
+                            <Edit3 size={12} />
                           </button>
                         </div>
                       )}
-                      <div className="flex items-center gap-2 sm:gap-3 mt-0.5">
-                        <span className="text-xs sm:text-sm text-neutral-500">
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className="text-xs text-neutral-500">
                           {stats.completed}/{stats.total} complete
                         </span>
                         {stats.total > 0 && (
-                          <span className="text-xs sm:text-sm font-medium text-[#F15A2B]">
+                          <span className="text-xs font-medium text-[#F15A2B]">
                             {Math.round(progressPercent)}%
                           </span>
                         )}
                       </div>
-                    </div>
+                    </button>
                   </div>
 
-                  {/* Right Controls */}
+                  {/* Right side actions */}
                   <div className="flex items-center gap-1 sm:gap-2">
+                    {/* Delete Phase Button (only for custom phases or empty default phases) */}
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
                         handleDeletePhase(phase.id);
                       }}
-                      className="p-1.5 sm:p-2 rounded-lg hover:bg-neutral-100 text-neutral-400 hover:text-neutral-600 transition-colors opacity-0 group-hover:opacity-100 hidden sm:block"
+                      className="p-1.5 rounded-lg hover:bg-neutral-100 text-neutral-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"
+                      title="Delete phase"
                     >
-                      <Trash2 size={16} />
+                      <Trash2 size={14} />
                     </button>
-                    <div className="p-1">
-                      {isExpanded ? (
-                        <ChevronUp size={18} className="text-neutral-400" />
-                      ) : (
-                        <ChevronDown size={18} className="text-neutral-400" />
-                      )}
-                    </div>
-                  </div>
-                </button>
 
-                {/* Progress Bar - Orange */}
+                    {/* Expand/Collapse */}
+                    <button
+                      onClick={() => togglePhase(phase.id)}
+                      className="p-1.5 rounded-lg hover:bg-neutral-100 text-neutral-400 transition-colors"
+                    >
+                      {isExpanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Progress Bar */}
                 {stats.total > 0 && (
-                  <div className="px-4 sm:px-5 pb-3 sm:pb-4">
-                    <div className="h-1 sm:h-1.5 bg-neutral-100 rounded-full overflow-hidden">
+                  <div className="px-4 sm:px-5 pb-3">
+                    <div className="h-1.5 bg-neutral-100 rounded-full overflow-hidden">
                       <div
                         className="h-full bg-[#F15A2B] rounded-full transition-all duration-500"
                         style={{ width: `${progressPercent}%` }}
@@ -409,62 +518,53 @@ const ProjectTimeline: React.FC<ProjectTimelineProps> = ({
                   </div>
                 )}
 
-                {/* Phase Body */}
+                {/* Expanded Content */}
                 {isExpanded && (
                   <div className="px-4 sm:px-5 pb-4 sm:pb-5 border-t border-neutral-100">
                     {/* Add Milestone */}
                     <div className="pt-3 sm:pt-4">
                       {showAddMilestone === phase.id ? (
-                        <div className="bg-neutral-50 rounded-xl p-4 sm:p-5 space-y-3 sm:space-y-4">
-                          <div>
-                            <label className="block text-sm font-medium text-neutral-700 mb-1.5">
-                              Milestone Title
-                            </label>
-                            <input
-                              type="text"
-                              value={newMilestone.title}
-                              onChange={(e) =>
-                                setNewMilestone({ ...newMilestone, title: e.target.value })
-                              }
-                              className="w-full px-3 sm:px-4 py-2.5 bg-white border border-neutral-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#F15A2B] focus:border-transparent transition-all text-sm sm:text-base"
-                              placeholder="e.g., Foundation Pour Complete"
-                              autoFocus
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-sm font-medium text-neutral-700 mb-1.5">
-                              Description
-                            </label>
-                            <textarea
-                              value={newMilestone.description}
-                              onChange={(e) =>
-                                setNewMilestone({ ...newMilestone, description: e.target.value })
-                              }
-                              className="w-full px-3 sm:px-4 py-2.5 bg-white border border-neutral-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#F15A2B] focus:border-transparent transition-all resize-none text-sm sm:text-base"
-                              rows={3}
-                              placeholder="Add details..."
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-sm font-medium text-neutral-700 mb-1.5">
-                              Date
-                            </label>
-                            <input
-                              type="date"
-                              value={newMilestone.date}
-                              onChange={(e) =>
-                                setNewMilestone({ ...newMilestone, date: e.target.value })
-                              }
-                              className="w-full px-3 sm:px-4 py-2.5 bg-white border border-neutral-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#F15A2B] focus:border-transparent transition-all text-sm sm:text-base"
-                            />
-                          </div>
-                          <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 pt-2">
+                        <div className="bg-neutral-50 rounded-xl p-3 sm:p-4 space-y-3">
+                          <input
+                            type="text"
+                            placeholder="Milestone title"
+                            value={newMilestone.title}
+                            onChange={(e) =>
+                              setNewMilestone((prev) => ({ ...prev, title: e.target.value }))
+                            }
+                            className="w-full px-3 py-2 bg-white border border-neutral-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#F15A2B]/20 focus:border-[#F15A2B]"
+                          />
+                          <textarea
+                            placeholder="Description (optional)"
+                            value={newMilestone.description}
+                            onChange={(e) =>
+                              setNewMilestone((prev) => ({ ...prev, description: e.target.value }))
+                            }
+                            rows={2}
+                            className="w-full px-3 py-2 bg-white border border-neutral-200 rounded-lg text-sm resize-none focus:outline-none focus:ring-2 focus:ring-[#F15A2B]/20 focus:border-[#F15A2B]"
+                          />
+                          <input
+                            type="date"
+                            value={newMilestone.date}
+                            onChange={(e) =>
+                              setNewMilestone((prev) => ({ ...prev, date: e.target.value }))
+                            }
+                            className="w-full px-3 py-2 bg-white border border-neutral-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#F15A2B]/20 focus:border-[#F15A2B]"
+                          />
+                          <div className="flex gap-2">
                             <button
                               onClick={() => handleCreateMilestone(phase.id)}
                               disabled={addingMilestone || !newMilestone.title.trim()}
-                              className="flex-1 px-4 py-2.5 bg-[#F15A2B] text-white rounded-lg font-medium hover:bg-[#d94d22] disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm sm:text-base"
+                              className="px-4 py-2.5 bg-[#F15A2B] text-white rounded-lg font-medium hover:bg-[#d94d22] disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm sm:text-base flex items-center gap-2"
                             >
-                              {addingMilestone ? 'Creating...' : 'Create Milestone'}
+                              {addingMilestone ? (
+                                <>
+                                  <Loader2 size={14} className="animate-spin" />
+                                  Creating...
+                                </>
+                              ) : (
+                                'Create Milestone'
+                              )}
                             </button>
                             <button
                               onClick={() => setShowAddMilestone(null)}
@@ -514,17 +614,17 @@ const ProjectTimeline: React.FC<ProjectTimelineProps> = ({
                                     {isCompleted ? (
                                       <CheckCircle2
                                         size={20}
-                                        className="text-[#F15A2B] hover:scale-110 transition-transform sm:w-[22px] sm:h-[22px]"
+                                        className="text-[#F15A2B] fill-[#F15A2B]/10"
                                       />
                                     ) : (
                                       <Circle
                                         size={20}
-                                        className="text-neutral-300 hover:text-[#F15A2B] hover:scale-110 transition-all sm:w-[22px] sm:h-[22px]"
+                                        className="text-neutral-300 hover:text-[#F15A2B] transition-colors"
                                       />
                                     )}
                                   </button>
 
-                                  {/* Content */}
+                                  {/* Milestone Content */}
                                   <div className="flex-1 min-w-0">
                                     {/* Title */}
                                     {editingMilestoneTitle === milestone.id ? (
@@ -534,39 +634,25 @@ const ProjectTimeline: React.FC<ProjectTimelineProps> = ({
                                         onChange={(e) => setTitleDraft(e.target.value)}
                                         onBlur={() => commitTitleEdit(milestone.id)}
                                         onKeyDown={(e) => handleTitleKeyDown(e, milestone.id)}
-                                        className="w-full font-medium bg-neutral-100 border border-neutral-300 rounded-lg px-2 sm:px-3 py-1 focus:outline-none focus:ring-2 focus:ring-[#F15A2B] text-sm sm:text-base"
                                         autoFocus
+                                        className="text-sm sm:text-base font-medium text-neutral-900 bg-transparent border-b border-[#F15A2B] outline-none w-full"
                                       />
                                     ) : (
-                                      <div className="flex items-center gap-2 group/title">
-                                        <h3
-                                          className={`font-medium text-sm sm:text-base truncate ${
-                                            isCompleted
-                                              ? 'text-neutral-400 line-through'
-                                              : 'text-neutral-900'
+                                      <h4
+                                        onClick={() => startEditingTitle(milestone)}
+                                        className={`text-sm sm:text-base font-medium cursor-pointer hover:text-[#F15A2B] transition-colors ${isCompleted
+                                          ? 'text-neutral-400 line-through'
+                                          : 'text-neutral-900'
                                           }`}
-                                        >
-                                          {milestone.title}
-                                        </h3>
-                                        <button
-                                          onClick={() => startEditingTitle(milestone)}
-                                          className="p-1 rounded hover:bg-neutral-100 transition-colors opacity-0 group-hover/title:opacity-100 hidden sm:block flex-shrink-0"
-                                        >
-                                          <Edit3 size={12} className="text-neutral-400" />
-                                        </button>
-                                      </div>
+                                      >
+                                        {milestone.title}
+                                      </h4>
                                     )}
 
-                                    {/* Meta */}
-                                    <div className="flex items-center gap-2 sm:gap-3 mt-1 text-xs sm:text-sm text-neutral-500">
-                                      <span>{formatDate(milestone.date)}</span>
-                                      {milestone.comments && milestone.comments.length > 0 && (
-                                        <span className="flex items-center gap-1">
-                                          <MessageSquare size={12} />
-                                          {milestone.comments.length}
-                                        </span>
-                                      )}
-                                    </div>
+                                    {/* Date */}
+                                    <p className="text-xs text-neutral-500 mt-0.5">
+                                      {formatDate(milestone.date)}
+                                    </p>
 
                                     {/* Description */}
                                     {editingMilestoneDesc === milestone.id ? (
@@ -575,9 +661,9 @@ const ProjectTimeline: React.FC<ProjectTimelineProps> = ({
                                         onChange={(e) => setDescDraft(e.target.value)}
                                         onBlur={() => commitDescEdit(milestone.id)}
                                         onKeyDown={(e) => handleDescKeyDown(e, milestone.id)}
-                                        className="w-full mt-2 text-sm bg-neutral-100 border border-neutral-300 rounded-lg px-2 sm:px-3 py-2 focus:outline-none focus:ring-2 focus:ring-[#F15A2B] resize-none"
-                                        rows={2}
                                         autoFocus
+                                        rows={2}
+                                        className="mt-2 w-full px-2 py-1 text-xs sm:text-sm text-neutral-600 bg-neutral-50 border border-neutral-200 rounded resize-none focus:outline-none focus:ring-2 focus:ring-[#F15A2B]/20 focus:border-[#F15A2B]"
                                       />
                                     ) : milestone.description ? (
                                       <p
@@ -595,9 +681,10 @@ const ProjectTimeline: React.FC<ProjectTimelineProps> = ({
                                       onClick={() =>
                                         setExpandedMilestone(isOpen ? null : milestone.id)
                                       }
-                                      className={`p-1.5 sm:p-2 rounded-lg hover:bg-neutral-100 transition-colors ${
-                                        isOpen ? 'text-[#F15A2B]' : 'text-neutral-400 hover:text-neutral-600'
-                                      }`}
+                                      className={`p-1.5 sm:p-2 rounded-lg hover:bg-neutral-100 transition-colors ${isOpen
+                                        ? 'text-[#F15A2B]'
+                                        : 'text-neutral-400 hover:text-neutral-600'
+                                        }`}
                                     >
                                       <MessageSquare size={16} />
                                     </button>
@@ -654,63 +741,51 @@ const ProjectTimeline: React.FC<ProjectTimelineProps> = ({
                                               onClick={() => setSelectedImage(comment.imageUrl!)}
                                             >
                                               <ImageIcon size={14} />
-                                              View image
+                                              View Image
                                             </button>
                                           )}
                                         </div>
                                       ))}
                                     </div>
                                   ) : (
-                                    <div className="mb-3 sm:mb-4 p-3 sm:p-4 border border-dashed border-neutral-300 rounded-lg text-center">
-                                      <p className="text-xs sm:text-sm text-neutral-400">
-                                        No updates yet. Add one below.
-                                      </p>
-                                    </div>
+                                    <p className="text-xs sm:text-sm text-neutral-500 mb-3 sm:mb-4">
+                                      No comments yet.
+                                    </p>
                                   )}
 
                                   {/* Add Comment Form */}
-                                  <div className="bg-white rounded-lg border border-neutral-200 p-2.5 sm:p-3 space-y-2 sm:space-y-3">
+                                  <div className="space-y-2">
                                     <textarea
+                                      placeholder="Add a comment..."
                                       value={commentText}
                                       onChange={(e) => setCommentText(e.target.value)}
-                                      className="w-full px-2.5 sm:px-3 py-2 border border-neutral-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#F15A2B] focus:border-transparent resize-none text-xs sm:text-sm"
                                       rows={2}
-                                      placeholder="Add an update..."
+                                      className="w-full px-3 py-2 bg-white border border-neutral-200 rounded-lg text-xs sm:text-sm resize-none focus:outline-none focus:ring-2 focus:ring-[#F15A2B]/20 focus:border-[#F15A2B]"
                                     />
-
-                                    <div className="flex items-center justify-between gap-2">
+                                    <div className="flex items-center justify-between">
                                       <div className="flex items-center gap-2">
-                                        <label className="flex items-center gap-1 sm:gap-1.5 px-2 sm:px-3 py-1.5 rounded-lg text-xs sm:text-sm text-neutral-600 cursor-pointer hover:bg-neutral-100 transition-colors border border-neutral-200">
-                                          <Camera size={14} />
-                                          <span className="hidden sm:inline">Photo</span>
+                                        <label className="cursor-pointer p-1.5 sm:p-2 rounded-lg hover:bg-neutral-100 text-neutral-400 hover:text-neutral-600 transition-colors">
+                                          <Camera size={16} />
                                           <input
                                             type="file"
                                             accept="image/*"
-                                            className="hidden"
                                             onChange={handleCommentImageChange}
+                                            className="hidden"
                                           />
                                         </label>
                                         {commentImagePreview && (
                                           <div className="relative">
-                                            <button
-                                              type="button"
-                                              className="relative w-8 h-8 sm:w-10 sm:h-10 rounded-lg overflow-hidden border border-neutral-200"
-                                              onClick={() => setSelectedImage(commentImagePreview)}
-                                            >
-                                              <img
-                                                src={commentImagePreview}
-                                                alt=""
-                                                className="w-full h-full object-cover"
-                                              />
-                                            </button>
+                                            <img
+                                              src={commentImagePreview}
+                                              alt="Preview"
+                                              className="w-8 h-8 sm:w-10 sm:h-10 rounded object-cover"
+                                            />
                                             <button
                                               type="button"
                                               onClick={() => {
                                                 setCommentImage(null);
-                                                if (commentImagePreview) {
-                                                  URL.revokeObjectURL(commentImagePreview);
-                                                  setCommentImagePreview(null);
-                                                }
+                                                URL.revokeObjectURL(commentImagePreview);
+                                                setCommentImagePreview(null);
                                               }}
                                               className="absolute -top-1 -right-1 w-4 h-4 sm:w-5 sm:h-5 bg-neutral-900 rounded-full flex items-center justify-center"
                                             >

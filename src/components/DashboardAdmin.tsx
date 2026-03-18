@@ -10,6 +10,7 @@ import {
   HardHat,
   DollarSign,
   TrendingUp,
+  TrendingDown,
   MessageSquare,
   Calendar,
   Trash2,
@@ -18,6 +19,11 @@ import {
   XCircle,
   ChevronDown,
   ChevronUp,
+  ArrowRight,
+  Building2,
+  FileText,
+  ClipboardList,
+  UserCheck,
 } from 'lucide-react';
 import { approveProject, rejectProject, deleteProject, updateProject } from '../services/db';
 
@@ -29,7 +35,80 @@ interface DashboardAdminProps {
   onOpenCreateClientModal: () => void;
   onOpenCreateContractorModal: () => void;
   onOpenMessages: () => void;
+  onNavigate?: (tab: string) => void;
 }
+
+// Stat Card Component matching BuilderMate style
+interface StatCardProps {
+  title: string;
+  subtitle: string;
+  value: string | number;
+  secondaryValue?: string;
+  percentChange?: number;
+  percentLabel?: string;
+  icon: React.ReactNode;
+  onViewDetails?: () => void;
+  highlight?: boolean;
+}
+
+const StatCard: React.FC<StatCardProps> = ({
+  title,
+  subtitle,
+  value,
+  secondaryValue,
+  percentChange,
+  percentLabel,
+  icon,
+  onViewDetails,
+  highlight = false,
+}) => {
+  const isPositive = percentChange !== undefined && percentChange >= 0;
+
+  return (
+    <div className={`bg-white rounded-2xl border p-5 ${highlight ? 'border-violet-200 bg-violet-50/30' : 'border-gray-100'}`}>
+      <div className="flex items-start justify-between mb-4">
+        <div>
+          <h3 className="text-sm font-semibold text-gray-900">{title}</h3>
+          <p className="text-xs text-gray-400 mt-0.5">{subtitle}</p>
+        </div>
+        <div className="h-10 w-10 rounded-xl bg-gray-50 flex items-center justify-center text-gray-400">
+          {icon}
+        </div>
+      </div>
+
+      <div className="mb-3">
+        <p className="text-3xl font-bold text-gray-900">{value}</p>
+        {secondaryValue && (
+          <p className="text-sm text-gray-500 mt-1">{secondaryValue}</p>
+        )}
+      </div>
+
+      {percentChange !== undefined && (
+        <div className="flex items-center gap-1.5 mb-3">
+          {isPositive ? (
+            <TrendingUp size={14} className="text-emerald-500" />
+          ) : (
+            <TrendingDown size={14} className="text-red-500" />
+          )}
+          <span className={`text-sm font-medium ${isPositive ? 'text-emerald-500' : 'text-red-500'}`}>
+            {isPositive ? '+' : ''}{percentChange}%
+          </span>
+          <span className="text-sm text-gray-400">{percentLabel || 'vs last month'}</span>
+        </div>
+      )}
+
+      {onViewDetails && (
+        <button
+          onClick={onViewDetails}
+          className="flex items-center gap-1 text-sm text-gray-500 hover:text-care-orange transition-colors group"
+        >
+          <span>View details</span>
+          <ArrowRight size={14} className="group-hover:translate-x-0.5 transition-transform" />
+        </button>
+      )}
+    </div>
+  );
+};
 
 const DashboardAdmin: React.FC<DashboardAdminProps> = ({
   projects,
@@ -39,14 +118,15 @@ const DashboardAdmin: React.FC<DashboardAdminProps> = ({
   onOpenCreateClientModal,
   onOpenCreateContractorModal,
   onOpenMessages,
+  onNavigate,
 }) => {
   // ── local UI state ──
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
-  const [rejectingId, setRejectingId]         = useState<string | null>(null);
-  const [rejectReason, setRejectReason]       = useState('');
-  const [pendingOpen, setPendingOpen]         = useState(true); // keep panel open by default
+  const [rejectingId, setRejectingId] = useState<string | null>(null);
+  const [rejectReason, setRejectReason] = useState('');
+  const [pendingOpen, setPendingOpen] = useState(true);
 
-  const clients     = users.filter((u) => u.role === UserRole.CLIENT);
+  const clients = users.filter((u) => u.role === UserRole.CLIENT);
   const contractors = users.filter((u) => u.role === UserRole.CONTRACTOR);
 
   // ── derived lists ──
@@ -64,33 +144,30 @@ const DashboardAdmin: React.FC<DashboardAdminProps> = ({
   );
 
   const totalBudget = projects.reduce((sum, p) => sum + (p.budget || 0), 0);
+  const totalSpent = projects.reduce((sum, p) => sum + (p.spent || 0), 0);
   const averageProgress =
     projects.length > 0
       ? Math.round(
-          projects.reduce((sum, p) => sum + (p.progress || 0), 0) /
-            projects.length
-        )
+        projects.reduce((sum, p) => sum + (p.progress || 0), 0) / projects.length
+      )
       : 0;
 
   // ── helpers ──
   const getStatusColor = (status: ProjectStatus | string): string => {
     const s = String(status);
     if (s === ProjectStatus.PENDING_APPROVAL || s === 'Pending Approval') return 'bg-violet-100 text-violet-700';
-    if (s === ProjectStatus.PLANNING        || s === 'Planning')         return 'bg-blue-100 text-blue-700';
-    if (s === ProjectStatus.DEMOLITION      || s === 'Demolition')       return 'bg-red-100 text-red-700';
-    if (s === ProjectStatus.ROUGH_IN        || s === 'Rough-in')         return 'bg-purple-100 text-purple-700';
-    if (s === ProjectStatus.FINISHING       || s === 'Finishing')        return 'bg-orange-100 text-orange-700';
-    if (s === ProjectStatus.COMPLETED       || s === 'Completed')        return 'bg-green-100 text-green-700';
-    if (s === ProjectStatus.ON_HOLD         || s === 'On Hold')          return 'bg-gray-100 text-gray-700';
+    if (s === ProjectStatus.PLANNING || s === 'Planning') return 'bg-blue-100 text-blue-700';
+    if (s === ProjectStatus.DEMOLITION || s === 'Demolition') return 'bg-red-100 text-red-700';
+    if (s === ProjectStatus.ROUGH_IN || s === 'Rough-in') return 'bg-purple-100 text-purple-700';
+    if (s === ProjectStatus.FINISHING || s === 'Finishing') return 'bg-orange-100 text-orange-700';
+    if (s === ProjectStatus.COMPLETED || s === 'Completed') return 'bg-green-100 text-green-700';
+    if (s === ProjectStatus.ON_HOLD || s === 'On Hold') return 'bg-gray-100 text-gray-700';
     return 'bg-gray-100 text-gray-700';
   };
 
-  // ── action handlers (call db directly; toast feedback via window event or silent) ──
+  // ── action handlers ──
   const handleApprove = async (projectId: string) => {
     try {
-      // "user" not in scope here; we use a placeholder admin id.
-      // Ideally the parent passes currentUser — but approveProject only
-      // stamps an audit field, so this works in the meantime.
       await approveProject(projectId, 'admin');
     } catch (e) {
       console.error('Approve failed', e);
@@ -117,221 +194,228 @@ const DashboardAdmin: React.FC<DashboardAdminProps> = ({
     }
   };
 
-const handleAssignContractor = async (projectId: string, contractorId: string) => {
-  if (!contractorId) return;
+  const handleAssignContractor = async (projectId: string, contractorId: string) => {
+    if (!contractorId) return;
+    try {
+      const project = projects.find((p) => p.id === projectId);
+      const existing =
+        project?.contractorIds && project.contractorIds.length > 0
+          ? project.contractorIds
+          : project?.contractorId
+            ? [project.contractorId]
+            : [];
+      const updatedContractorIds = existing.includes(contractorId)
+        ? existing
+        : [...existing, contractorId];
 
-  try {
-    // Find the current project so we can preserve existing contractorIds
-    const project = projects.find((p) => p.id === projectId);
+      await updateProject(projectId, {
+        contractorId: contractorId,
+        contractorIds: updatedContractorIds,
+      });
+    } catch (e) {
+      console.error('Assign contractor failed', e);
+    }
+  };
 
-    const existing =
-      project?.contractorIds && project.contractorIds.length > 0
-        ? project.contractorIds
-        : project?.contractorId
-        ? [project.contractorId]
-        : [];
+  const handleAssignClient = async (projectId: string, clientId: string) => {
+    if (!clientId) return;
+    try {
+      const project = projects.find((p) => p.id === projectId);
+      const existing =
+        project?.clientIds && project.clientIds.length > 0
+          ? project.clientIds
+          : project?.clientId
+            ? [project.clientId]
+            : [];
+      const updatedClientIds = existing.includes(clientId)
+        ? existing
+        : [...existing, clientId];
 
-    // Add the new contractor to the list (no duplicates)
-    const updatedContractorIds = existing.includes(contractorId)
-      ? existing
-      : [...existing, contractorId];
-
-    await updateProject(projectId, {
-      contractorId: contractorId,          // primary contractor
-      contractorIds: updatedContractorIds, // full team list
-    });
-  } catch (e) {
-    console.error('Assign contractor failed', e);
-  }
-};
-
-const handleAssignClient = async (projectId: string, clientId: string) => {
-  if (!clientId) return;
-
-  try {
-    // Find the current project so we can preserve existing clientIds
-    const project = projects.find((p) => p.id === projectId);
-
-    const existing =
-      project?.clientIds && project.clientIds.length > 0
-        ? project.clientIds
-        : project?.clientId
-        ? [project.clientId]
-        : [];
-
-    // Add the new client to the list (no duplicates)
-    const updatedClientIds = existing.includes(clientId)
-      ? existing
-      : [...existing, clientId];
-
-    await updateProject(projectId, {
-      clientId: clientId,          // primary client
-      clientIds: updatedClientIds, // full client list
-    });
-  } catch (e) {
-    console.error('Assign client failed', e);
-  }
-};
-
-
+      await updateProject(projectId, {
+        clientId: clientId,
+        clientIds: updatedClientIds,
+      });
+    } catch (e) {
+      console.error('Assign client failed', e);
+    }
+  };
 
   // ── render ──
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       {/* ── Header ── */}
       <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div>
-          <p className="text-[10px] font-black text-gray-400 uppercase tracking-[0.18em] mb-1">
-            Admin Command Center
-          </p>
-          <h1 className="text-2xl font-black text-[#111827]">
-            Oversee every project in one view.
-          </h1>
-          <p className="text-xs text-gray-500 mt-1">
-            Manage clients, contractors, and projects from a single secure dashboard.
+          <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
+          <p className="text-sm text-gray-500 mt-1">
+            Welcome back! Here's what's happening with your projects.
           </p>
         </div>
 
         <div className="flex flex-wrap gap-2">
           <button
             onClick={onOpenCreateModal}
-            className="flex items-center gap-2 px-4 py-2.5 bg-care-orange text-white rounded-xl text-xs font-black uppercase tracking-wider hover:bg-orange-600 transition-all shadow-lg shadow-care-orange/20"
+            className="flex items-center gap-2 px-4 py-2.5 bg-care-orange text-white rounded-xl text-sm font-semibold hover:bg-orange-600 transition-all shadow-sm"
           >
             <Plus size={16} />
             New Project
           </button>
           <button
             onClick={onOpenCreateClientModal}
-            className="flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-200 text-gray-700 rounded-xl text-xs font-black uppercase tracking-wider hover:border-care-orange/40 transition-all"
+            className="flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-200 text-gray-700 rounded-xl text-sm font-semibold hover:border-gray-300 transition-all"
           >
             <UserPlus size={16} />
             Add Client
           </button>
           <button
             onClick={onOpenCreateContractorModal}
-            className="flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-200 text-gray-700 rounded-xl text-xs font-black uppercase tracking-wider hover:border-care-orange/40 transition-all"
+            className="flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-200 text-gray-700 rounded-xl text-sm font-semibold hover:border-gray-300 transition-all"
           >
             <HardHat size={16} />
             Add Contractor
           </button>
-          <button
-            onClick={onOpenMessages}
-            className="flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-200 text-gray-700 rounded-xl text-xs font-black uppercase tracking-wider hover:border-care-orange/40 transition-all"
-          >
-            <MessageSquare size={16} />
-            Messages
-          </button>
         </div>
       </header>
 
-      {/* ── Stats ── */}
-      <section className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
-        <div className="bg-white border border-gray-100 rounded-2xl p-4 flex items-center gap-3">
-          <div className="h-10 w-10 rounded-xl bg-[#1A1A1A]/95 flex items-center justify-center">
-            <Briefcase size={18} className="text-white" />
-          </div>
-          <div>
-            <p className="text-[11px] text-gray-400 uppercase tracking-[0.18em]">Total Projects</p>
-            <p className="text-lg font-black text-[#111827]">{projects.length}</p>
-          </div>
-        </div>
+      {/* ── Stats Grid (BuilderMate Style) ── */}
+      <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard
+          title="Active Projects"
+          subtitle="Projects in progress"
+          value={activeProjects.length}
+          secondaryValue={`$${totalBudget.toLocaleString()}`}
+          icon={<Building2 size={20} />}
+          onViewDetails={() => onNavigate?.('projects')}
+        />
 
-        {/* Pending approval stat – highlighted when >0 */}
-        <div className={`rounded-2xl p-4 flex items-center gap-3 border ${pendingProjects.length > 0 ? 'bg-violet-50 border-violet-200' : 'bg-white border-gray-100'}`}>
-          <div className={`h-10 w-10 rounded-xl flex items-center justify-center ${pendingProjects.length > 0 ? 'bg-violet-100' : 'bg-violet-50'}`}>
-            <Hourglass size={18} className="text-violet-600" />
-          </div>
-          <div>
-            <p className="text-[11px] text-gray-400 uppercase tracking-[0.18em]">Pending</p>
-            <p className={`text-lg font-black ${pendingProjects.length > 0 ? 'text-violet-700' : 'text-[#111827]'}`}>
-              {pendingProjects.length}
-            </p>
-          </div>
-        </div>
+        <StatCard
+          title="Pipeline Value"
+          subtitle="Last 30 days"
+          value={`$${totalBudget.toLocaleString()}`}
+          secondaryValue={`${projects.length} total projects`}
+          percentChange={12}
+          percentLabel="vs last month"
+          icon={<FileText size={20} />}
+          onViewDetails={() => onNavigate?.('budget')}
+        />
 
-        <div className="bg-white border border-gray-100 rounded-2xl p-4 flex items-center gap-3">
-          <div className="h-10 w-10 rounded-xl bg-amber-50 flex items-center justify-center">
-            <Clock size={18} className="text-amber-500" />
-          </div>
-          <div>
-            <p className="text-[11px] text-gray-400 uppercase tracking-[0.18em]">Active</p>
-            <p className="text-lg font-black text-[#111827]">{activeProjects.length}</p>
-          </div>
-        </div>
+        <StatCard
+          title="Pending Approval"
+          subtitle="Awaiting review"
+          value={pendingProjects.length}
+          secondaryValue={pendingProjects.length > 0 ? 'Requires attention' : 'All caught up'}
+          icon={<Hourglass size={20} />}
+          highlight={pendingProjects.length > 0}
+        />
 
-        <div className="bg-white border border-gray-100 rounded-2xl p-4 flex items-center gap-3">
-          <div className="h-10 w-10 rounded-xl bg-emerald-50 flex items-center justify-center">
-            <CheckCircle size={18} className="text-emerald-500" />
-          </div>
-          <div>
-            <p className="text-[11px] text-gray-400 uppercase tracking-[0.18em]">Completed</p>
-            <p className="text-lg font-black text-[#111827]">{completedProjects.length}</p>
-          </div>
-        </div>
+        <StatCard
+          title="Team Members"
+          subtitle="Active this week"
+          value={clients.length + contractors.length}
+          secondaryValue={`${clients.length} clients · ${contractors.length} contractors`}
+          icon={<UserCheck size={20} />}
+          onViewDetails={() => onNavigate?.('directory')}
+        />
+      </section>
 
-        <div className="bg-white border border-gray-100 rounded-2xl p-4 flex items-center gap-3">
-          <div className="h-10 w-10 rounded-xl bg-gray-50 flex items-center justify-center">
-            <DollarSign size={18} className="text-[#1A1A1A]" />
-          </div>
-          <div>
-            <p className="text-[11px] text-gray-400 uppercase tracking-[0.18em]">Total Budget</p>
-            <p className="text-lg font-black text-[#111827]">
-              {totalBudget.toLocaleString(undefined, { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })}
-            </p>
-          </div>
-        </div>
+      {/* ── Secondary Stats Row ── */}
+      <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <StatCard
+          title="Completed"
+          subtitle="Finished projects"
+          value={completedProjects.length}
+          secondaryValue={`${averageProgress}% avg progress`}
+          percentChange={8}
+          percentLabel="vs last quarter"
+          icon={<CheckCircle size={20} />}
+        />
+
+        <StatCard
+          title="Messages"
+          subtitle="Unread conversations"
+          value={0}
+          secondaryValue="All caught up"
+          icon={<MessageSquare size={20} />}
+          onViewDetails={onOpenMessages}
+        />
+
+        <StatCard
+          title="Action Items"
+          subtitle="This week"
+          value={pendingProjects.length}
+          secondaryValue={`${pendingProjects.length} items need attention`}
+          icon={<ClipboardList size={20} />}
+        />
       </section>
 
       {/* ── Pending Approvals Panel ── */}
       {(pendingProjects.length > 0 || pendingOpen) && (
-        <section className="bg-violet-50 border border-violet-200 rounded-2xl overflow-hidden">
+        <section className="bg-white border border-gray-100 rounded-2xl overflow-hidden">
           <button
             onClick={() => setPendingOpen((v) => !v)}
-            className="w-full flex items-center justify-between px-5 py-3.5 hover:bg-violet-100 transition-colors"
+            className="w-full flex items-center justify-between px-5 py-4 hover:bg-gray-50 transition-colors"
           >
-            <div className="flex items-center gap-2">
-              <Hourglass size={16} className="text-violet-600" />
-              <span className="text-xs font-black text-violet-700 uppercase tracking-[0.18em]">
-                Pending Approval Requests
-              </span>
-              {pendingProjects.length > 0 && (
-                <span className="bg-violet-600 text-white text-[10px] font-black px-2 py-0.5 rounded-full">
-                  {pendingProjects.length}
+            <div className="flex items-center gap-3">
+              <div className="h-9 w-9 rounded-xl bg-violet-100 flex items-center justify-center">
+                <Hourglass size={16} className="text-violet-600" />
+              </div>
+              <div className="text-left">
+                <span className="text-sm font-semibold text-gray-900">
+                  Pending Approval Requests
                 </span>
-              )}
+                {pendingProjects.length > 0 && (
+                  <span className="ml-2 bg-violet-600 text-white text-xs font-semibold px-2 py-0.5 rounded-full">
+                    {pendingProjects.length}
+                  </span>
+                )}
+                <p className="text-xs text-gray-400">Review and approve project requests</p>
+              </div>
             </div>
-            {pendingOpen ? <ChevronUp size={16} className="text-violet-500" /> : <ChevronDown size={16} className="text-violet-500" />}
+            {pendingOpen ? (
+              <ChevronUp size={18} className="text-gray-400" />
+            ) : (
+              <ChevronDown size={18} className="text-gray-400" />
+            )}
           </button>
 
           {pendingOpen && (
-            <div className="px-5 pb-5">
+            <div className="px-5 pb-5 border-t border-gray-100">
               {pendingProjects.length === 0 ? (
-                <p className="text-xs text-violet-500 text-center py-4">No pending requests right now.</p>
+                <p className="text-sm text-gray-400 text-center py-8">
+                  No pending requests right now. All caught up! 🎉
+                </p>
               ) : (
-                <div className="space-y-3">
+                <div className="space-y-3 mt-4">
                   {pendingProjects.map((project) => {
                     const contractor = users.find((u) => u.id === project.contractorId);
                     const isRejectingThis = rejectingId === project.id;
 
                     return (
-                      <div key={project.id} className="bg-white border border-violet-200 rounded-xl p-4">
-                        <div className="flex items-start justify-between gap-3 mb-2">
+                      <div
+                        key={project.id}
+                        className="bg-gray-50 border border-gray-100 rounded-xl p-4"
+                      >
+                        <div className="flex items-start justify-between gap-3 mb-3">
                           <div className="min-w-0">
-                            <h3 className="text-sm font-black text-[#111827] truncate">{project.title}</h3>
-                            <p className="text-xs text-gray-500 mt-0.5 line-clamp-1">{project.description || 'No description'}</p>
+                            <h3 className="text-sm font-semibold text-gray-900 truncate">
+                              {project.title}
+                            </h3>
+                            <p className="text-xs text-gray-500 mt-0.5 line-clamp-1">
+                              {project.description || 'No description'}
+                            </p>
                           </div>
-                          <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-violet-100 text-violet-700 shrink-0 whitespace-nowrap">
+                          <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-violet-100 text-violet-700 shrink-0 whitespace-nowrap">
                             {contractor?.name || 'Unknown contractor'}
                           </span>
                         </div>
 
-                        <div className="flex items-center gap-4 text-xs text-gray-500 mb-3">
-                          <span className="flex items-center gap-1">
-                            <DollarSign size={12} className="text-care-orange" />
+                        <div className="flex items-center gap-4 text-xs text-gray-500 mb-4">
+                          <span className="flex items-center gap-1.5">
+                            <DollarSign size={14} className="text-gray-400" />
                             ${(project.budget || 0).toLocaleString()}
                           </span>
-                          <span className="flex items-center gap-1">
-                            <Calendar size={12} className="text-care-orange" />
+                          <span className="flex items-center gap-1.5">
+                            <Calendar size={14} className="text-gray-400" />
                             {project.startDate} → {project.estimatedEndDate}
                           </span>
                         </div>
@@ -344,7 +428,7 @@ const handleAssignClient = async (projectId: string, clientId: string) => {
                               placeholder="Reason for rejection…"
                               value={rejectReason}
                               onChange={(e) => setRejectReason(e.target.value)}
-                              className="w-full text-xs p-2.5 border-2 border-red-200 rounded-lg bg-red-50 focus:border-red-400 focus:ring-0 resize-none"
+                              className="w-full text-sm p-3 border border-red-200 rounded-xl bg-red-50 focus:border-red-400 focus:ring-0 resize-none"
                             />
                           </div>
                         )}
@@ -352,7 +436,7 @@ const handleAssignClient = async (projectId: string, clientId: string) => {
                         <div className="flex items-center gap-2">
                           <button
                             onClick={() => handleApprove(project.id)}
-                            className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 text-white text-xs font-black rounded-lg hover:bg-emerald-700 transition-colors"
+                            className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 text-white text-sm font-semibold rounded-xl hover:bg-emerald-700 transition-colors"
                           >
                             <CheckCircle2 size={14} />
                             Approve
@@ -363,22 +447,28 @@ const handleAssignClient = async (projectId: string, clientId: string) => {
                               <button
                                 onClick={() => handleReject(project.id)}
                                 disabled={!rejectReason.trim()}
-                                className="flex items-center gap-1.5 px-3 py-1.5 bg-red-600 text-white text-xs font-black rounded-lg hover:bg-red-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                                className="flex items-center gap-1.5 px-4 py-2 bg-red-600 text-white text-sm font-semibold rounded-xl hover:bg-red-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                               >
                                 <XCircle size={14} />
                                 Confirm Reject
                               </button>
                               <button
-                                onClick={() => { setRejectingId(null); setRejectReason(''); }}
-                                className="text-xs text-gray-500 hover:text-gray-700 font-semibold"
+                                onClick={() => {
+                                  setRejectingId(null);
+                                  setRejectReason('');
+                                }}
+                                className="text-sm text-gray-500 hover:text-gray-700 font-medium px-3"
                               >
                                 Cancel
                               </button>
                             </>
                           ) : (
                             <button
-                              onClick={() => { setRejectingId(project.id); setRejectReason(''); }}
-                              className="flex items-center gap-1.5 px-3 py-1.5 bg-red-50 text-red-600 text-xs font-black rounded-lg hover:bg-red-100 transition-colors"
+                              onClick={() => {
+                                setRejectingId(project.id);
+                                setRejectReason('');
+                              }}
+                              className="flex items-center gap-1.5 px-4 py-2 bg-white border border-gray-200 text-gray-700 text-sm font-semibold rounded-xl hover:bg-gray-50 transition-colors"
                             >
                               <XCircle size={14} />
                               Reject
@@ -395,165 +485,176 @@ const handleAssignClient = async (projectId: string, clientId: string) => {
         </section>
       )}
 
-      {/* ── Main content ── */}
-      <section className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {/* Team overview */}
-        <div className="bg-white border border-gray-100 rounded-2xl p-4">
-          <h2 className="text-xs font-black text-[#111827] uppercase tracking-[0.18em] mb-4">
-            Team Overview
-          </h2>
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className="h-8 w-8 rounded-full bg-gray-100 flex items-center justify-center">
-                  <Users size={16} className="text-[#1A1A1A]" />
-                </div>
-                <div>
-                  <p className="font-semibold text-[#111827]">Clients</p>
-                  <p className="text-gray-500">{clients.length} active</p>
-                </div>
-              </div>
-            </div>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className="h-8 w-8 rounded-full bg-gray-100 flex items-center justify-center">
-                  <HardHat size={16} className="text-[#1A1A1A]" />
-                </div>
-                <div>
-                  <p className="font-semibold text-[#111827]">Contractors</p>
-                  <p className="text-gray-500">{contractors.length} active</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Project list */}
-        <div className="bg-white border border-gray-100 rounded-2xl p-4 lg:col-span-2">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-xs font-black text-[#111827] uppercase tracking-[0.18em]">
-              Projects
-            </h2>
-            <p className="text-[11px] text-gray-500 flex items-center gap-1">
-              <TrendingUp size={14} className="text-care-orange" />
-              {averageProgress}% average progress
+      {/* ── Recent Projects ── */}
+      <section className="bg-white border border-gray-100 rounded-2xl overflow-hidden">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+          <div>
+            <h2 className="text-sm font-semibold text-gray-900">Recent Projects</h2>
+            <p className="text-xs text-gray-400 mt-0.5">
+              {projects.length} projects · {averageProgress}% average progress
             </p>
           </div>
+          <button
+            onClick={() => onNavigate?.('projects')}
+            className="flex items-center gap-1 text-sm text-gray-500 hover:text-care-orange transition-colors"
+          >
+            <span>View all</span>
+            <ArrowRight size={14} />
+          </button>
+        </div>
 
-          {projects.length === 0 ? (
-            <div className="border border-dashed border-gray-200 rounded-xl p-6 text-center text-xs text-gray-500">
-              No projects yet. Use "New Project" to create your first one.
+        {projects.length === 0 ? (
+          <div className="p-8 text-center">
+            <div className="h-12 w-12 rounded-xl bg-gray-100 flex items-center justify-center mx-auto mb-3">
+              <Briefcase size={20} className="text-gray-400" />
             </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {projects.map((project) => {
-                const isConfirmingDelete = confirmDeleteId === project.id;
+            <p className="text-sm text-gray-500">No projects yet</p>
+            <p className="text-xs text-gray-400 mt-1">
+              Create your first project to get started
+            </p>
+            <button
+              onClick={onOpenCreateModal}
+              className="mt-4 inline-flex items-center gap-2 px-4 py-2 bg-care-orange text-white text-sm font-semibold rounded-xl hover:bg-orange-600 transition-colors"
+            >
+              <Plus size={14} />
+              New Project
+            </button>
+          </div>
+        ) : (
+          <div className="divide-y divide-gray-100">
+            {projects.slice(0, 5).map((project) => {
+              const isConfirmingDelete = confirmDeleteId === project.id;
+              const client = clients.find((c) => c.id === project.clientId);
 
-                return (
-                  <div
-                    key={project.id}
-                    className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 hover:shadow-lg hover:border-care-orange/20 transition-all group relative"
-                  >
-                    {isConfirmingDelete && (
-                      <div className="absolute inset-0 bg-white/95 rounded-2xl z-10 flex flex-col items-center justify-center p-5 text-center">
-                        <Trash2 size={24} className="text-red-500 mb-2" />
-                        <p className="text-sm font-black text-[#111827] mb-1">Delete this project?</p>
-                        <p className="text-xs text-gray-500 mb-4">This cannot be undone.</p>
-                        <div className="flex gap-2">
-                          <button
-                            onClick={() => handleDelete(project.id)}
-                            className="px-4 py-1.5 bg-red-600 text-white text-xs font-black rounded-lg hover:bg-red-700 transition-colors"
+              return (
+                <div
+                  key={project.id}
+                  className="px-5 py-4 hover:bg-gray-50 transition-colors cursor-pointer relative group"
+                  onClick={() => onSelectProject(project)}
+                >
+                  {isConfirmingDelete && (
+                    <div className="absolute inset-0 bg-white/95 z-10 flex items-center justify-center gap-3 px-5">
+                      <p className="text-sm font-medium text-gray-700">Delete this project?</p>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDelete(project.id);
+                        }}
+                        className="px-3 py-1.5 bg-red-600 text-white text-xs font-semibold rounded-lg hover:bg-red-700 transition-colors"
+                      >
+                        Delete
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setConfirmDeleteId(null);
+                        }}
+                        className="px-3 py-1.5 border border-gray-200 text-gray-600 text-xs font-semibold rounded-lg hover:bg-gray-50 transition-colors"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-4 min-w-0 flex-1">
+                      <div className="h-10 w-10 rounded-xl bg-gray-100 flex items-center justify-center shrink-0">
+                        <Building2 size={18} className="text-gray-500" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-sm font-semibold text-gray-900 truncate">
+                            {project.title}
+                          </h3>
+                          <span
+                            className={`text-[10px] font-semibold px-2 py-0.5 rounded-full uppercase ${getStatusColor(
+                              project.status
+                            )}`}
                           >
-                            Delete
-                          </button>
-                          <button
-                            onClick={() => setConfirmDeleteId(null)}
-                            className="px-4 py-1.5 border border-gray-200 text-gray-600 text-xs font-black rounded-lg hover:bg-gray-50 transition-colors"
-                          >
-                            Cancel
-                          </button>
+                            {project.status}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-3 mt-1 text-xs text-gray-500">
+                          {client && <span>{client.name}</span>}
+                          <span>${(project.budget || 0).toLocaleString()}</span>
                         </div>
                       </div>
-                    )}
+                    </div>
 
-                    <div className="flex justify-between items-start mb-2">
-                      <div
-                        className="flex-1 min-w-0 cursor-pointer"
-                        onClick={() => onSelectProject(project)}
+                    <div className="flex items-center gap-4">
+                      <div className="text-right hidden sm:block">
+                        <p className="text-sm font-semibold text-gray-900">{project.progress}%</p>
+                        <div className="w-24 h-1.5 bg-gray-100 rounded-full overflow-hidden mt-1">
+                          <div
+                            className="h-full bg-care-orange rounded-full transition-all duration-500"
+                            style={{ width: `${project.progress}%` }}
+                          />
+                        </div>
+                      </div>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setConfirmDeleteId(project.id);
+                        }}
+                        className="p-2 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
                       >
-                        <h3 className="text-lg font-bold group-hover:text-care-orange transition-colors truncate">
-                          {project.title}
-                        </h3>
-                        <p className="text-sm text-gray-500 mt-0.5 line-clamp-1">
-                          {project.description || 'No description'}
-                        </p>
-                      </div>
-                      <div className="flex items-center gap-1.5 ml-2 shrink-0">
-                        <span className={`text-[10px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider ${getStatusColor(project.status)}`}>
-                          {project.status}
-                        </span>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); setConfirmDeleteId(project.id); }}
-                          className="p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
-                          title="Delete project"
-                        >
-                          <Trash2 size={15} />
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="mb-3">
-                      <label className="text-[10px] font-black text-gray-400 uppercase tracking-[0.14em]">Client</label>
-                      <select
-                        value={project.clientId || ''}
-                        onChange={(e) => handleAssignClient(project.id, e.target.value)}
-                        onClick={(e) => e.stopPropagation()}
-                        className="w-full mt-0.5 text-xs font-semibold text-gray-700 bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1.5 appearance-none cursor-pointer focus:border-care-orange focus:ring-0 transition-colors"
-                      >
-                        <option value="">— No Client —</option>
-                        {clients.map((c) => (
-                          <option key={c.id} value={c.id}>{c.name}</option>
-                        ))}
-                      </select>
-                    </div>
-
-                    <div
-                      className="mb-4 cursor-pointer"
-                      onClick={() => onSelectProject(project)}
-                    >
-                      <div className="flex justify-between items-end mb-1.5">
-                        <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Progress</span>
-                        <span className="text-sm font-black text-care-orange">{project.progress}%</span>
-                      </div>
-                      <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden">
-                        <div
-                          className="h-full bg-gradient-to-r from-care-orange to-orange-400 transition-all duration-500 rounded-full"
-                          style={{ width: `${project.progress}%` }}
-                        />
-                      </div>
-                    </div>
-
-                    <div
-                      className="grid grid-cols-2 gap-3 text-xs cursor-pointer"
-                      onClick={() => onSelectProject(project)}
-                    >
-                      <div className="flex items-center gap-2 text-gray-500">
-                        <Calendar size={14} className="text-care-orange" />
-                        <span className="font-medium">
-                          {new Date(project.estimatedEndDate).toLocaleDateString()}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-2 text-gray-500">
-                        <DollarSign size={14} className="text-care-orange" />
-                        <span className="font-medium">${(project.budget || 0).toLocaleString()}</span>
-                      </div>
+                        <Trash2 size={16} />
+                      </button>
+                      <ArrowRight size={16} className="text-gray-300 group-hover:text-gray-500 transition-colors" />
                     </div>
                   </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+      {/* ── Quick Actions Grid ── */}
+      <section className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <button
+          onClick={onOpenMessages}
+          className="bg-white border border-gray-100 rounded-2xl p-4 text-left hover:border-care-orange/30 hover:shadow-sm transition-all group"
+        >
+          <div className="h-10 w-10 rounded-xl bg-blue-50 flex items-center justify-center mb-3 group-hover:bg-blue-100 transition-colors">
+            <MessageSquare size={18} className="text-blue-600" />
+          </div>
+          <h3 className="text-sm font-semibold text-gray-900">Messages</h3>
+          <p className="text-xs text-gray-400 mt-0.5">View conversations</p>
+        </button>
+
+        <button
+          onClick={() => onNavigate?.('calendar')}
+          className="bg-white border border-gray-100 rounded-2xl p-4 text-left hover:border-care-orange/30 hover:shadow-sm transition-all group"
+        >
+          <div className="h-10 w-10 rounded-xl bg-purple-50 flex items-center justify-center mb-3 group-hover:bg-purple-100 transition-colors">
+            <Calendar size={18} className="text-purple-600" />
+          </div>
+          <h3 className="text-sm font-semibold text-gray-900">Calendar</h3>
+          <p className="text-xs text-gray-400 mt-0.5">View schedule</p>
+        </button>
+
+        <button
+          onClick={() => onNavigate?.('invoices')}
+          className="bg-white border border-gray-100 rounded-2xl p-4 text-left hover:border-care-orange/30 hover:shadow-sm transition-all group"
+        >
+          <div className="h-10 w-10 rounded-xl bg-emerald-50 flex items-center justify-center mb-3 group-hover:bg-emerald-100 transition-colors">
+            <DollarSign size={18} className="text-emerald-600" />
+          </div>
+          <h3 className="text-sm font-semibold text-gray-900">Invoices</h3>
+          <p className="text-xs text-gray-400 mt-0.5">Manage billing</p>
+        </button>
+
+        <button
+          onClick={() => onNavigate?.('directory')}
+          className="bg-white border border-gray-100 rounded-2xl p-4 text-left hover:border-care-orange/30 hover:shadow-sm transition-all group"
+        >
+          <div className="h-10 w-10 rounded-xl bg-amber-50 flex items-center justify-center mb-3 group-hover:bg-amber-100 transition-colors">
+            <Users size={18} className="text-amber-600" />
+          </div>
+          <h3 className="text-sm font-semibold text-gray-900">Directory</h3>
+          <p className="text-xs text-gray-400 mt-0.5">View team members</p>
+        </button>
       </section>
     </div>
   );

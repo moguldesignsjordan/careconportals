@@ -73,6 +73,7 @@ import InvoicesPage from './components/InvoicesPage';
 import CreateInvoiceModal from './components/CreateInvoiceModal';
 import InvoicePaymentPage from './components/InvoicePaymentPage';
 import BudgetCalculator from './components/BudgetCalculator';
+import CommunicationsHub from './components/CommunicationsHub';
 
 // Icons
 import { Loader2, Menu, CheckCircle, XCircle, Info, ArrowLeft, LayoutGrid, Clock } from 'lucide-react';
@@ -89,7 +90,8 @@ type ViewType =
   | 'calendar'
   | 'invoices'
   | 'invoice-payment'
-  | 'budget';
+  | 'budget'
+  | 'communications';
 
 interface Toast {
   id: string;
@@ -809,6 +811,14 @@ const App: React.FC = () => {
         return (
           <BudgetCalculator
             projects={projects}
+            users={users}
+            currentUser={user}
+          />
+        );
+
+      case 'communications':
+        return (
+          <CommunicationsHub
             users={users}
             currentUser={user}
           />

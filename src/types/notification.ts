@@ -79,6 +79,10 @@ export interface AppNotification {
   isRead: boolean;
   isArchived: boolean;
   isEmailSent: boolean;
+  isSmsSent: boolean;
+
+  /** Twilio message SID (set by Cloud Function after successful send) */
+  smsSid?: string;
 
   /** Timestamps (ISO strings) */
   createdAt: string;
@@ -88,8 +92,10 @@ export interface AppNotification {
 /** Data required to create a new notification (id + timestamps auto-generated) */
 export type CreateNotificationData = Omit<
   AppNotification,
-  'id' | 'isRead' | 'isArchived' | 'isEmailSent' | 'createdAt' | 'readAt'
+  'id' | 'isRead' | 'isArchived' | 'isEmailSent' | 'isSmsSent' | 'smsSid' | 'createdAt' | 'readAt'
 >;
+
+// ============ EMAIL PREFERENCES ============
 
 /** Email notification preferences per user (stored in users collection) */
 export interface EmailNotificationPreferences {
@@ -126,6 +132,44 @@ export const DEFAULT_EMAIL_PREFERENCES: EmailNotificationPreferences = {
     enabled: false,
     startHour: 22,
     endHour: 7,
+    timezone: 'America/New_York',
+  },
+};
+
+// ============ SMS PREFERENCES ============
+
+/** SMS notification preferences per user (stored in users collection) */
+export interface SMSNotificationPreferences {
+  enabled: boolean;
+  /** Which categories trigger SMS */
+  categories: {
+    [key in NotificationCategory]: boolean;
+  };
+  /** Quiet hours — no SMS during this window */
+  quietHours?: {
+    enabled: boolean;
+    startHour: number; // 0-23
+    endHour: number; // 0-23
+    timezone: string;
+  };
+}
+
+/** Default SMS preferences for new users — opt-in by default (SMS costs per message) */
+export const DEFAULT_SMS_PREFERENCES: SMSNotificationPreferences = {
+  enabled: false,
+  categories: {
+    [NotificationCategory.PROJECT]: true,
+    [NotificationCategory.MESSAGE]: false, // Too noisy for SMS
+    [NotificationCategory.INVOICE]: true,
+    [NotificationCategory.MILESTONE]: true,
+    [NotificationCategory.DOCUMENT]: false,
+    [NotificationCategory.CALENDAR]: true,
+    [NotificationCategory.SYSTEM]: true,
+  },
+  quietHours: {
+    enabled: true,
+    startHour: 21,
+    endHour: 8,
     timezone: 'America/New_York',
   },
 };

@@ -1,10 +1,13 @@
 // functions/src/index.ts
-// Firebase Cloud Functions for Square Payment Integration
-// Gen 1 API (compatible with existing deployed functions)
-// Uses native fetch (Node 20+)
+// Firebase Cloud Functions for Care General Construction Portal
+// - Square Payment Integration
+// - Twilio SMS (callable + inline on payment events)
+// - Email + SMS Notifications (via notificationEmail.ts trigger)
+// Gen 1 API · Node 20+ (native fetch)
 
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
+import * as crypto from "crypto";
 
 // Initialize Firebase Admin
 admin.initializeApp();
@@ -12,17 +15,13 @@ admin.initializeApp();
 const db = admin.firestore();
 
 // ============ SQUARE CONFIG ============
-// Reads from functions/.env file (or runtime environment)
-// Create functions/.env with:
-//   SQUARE_ACCESS_TOKEN=your_token
-//   SQUARE_LOCATION_ID=your_location_id
-//   SQUARE_ENVIRONMENT=sandbox
 
 const getSquareConfig = () => {
   return {
     accessToken: process.env.SQUARE_ACCESS_TOKEN || "",
     locationId: process.env.SQUARE_LOCATION_ID || "",
     environment: process.env.SQUARE_ENVIRONMENT || "sandbox",
+    webhookSignatureKey: process.env.SQUARE_WEBHOOK_SIGNATURE_KEY || "",
   };
 };
 
@@ -32,6 +31,152 @@ const getSquareBaseUrl = (environment: string) => {
     : "https://connect.squareupsandbox.com";
 };
 
+// ============ TWILIO CONFIG ============
+// Add to functions/.env:
+//   TWILIO_ACCOUNT_SID=your_account_sid
+//   TWILIO_AUTH_TOKEN=your_auth_token
+//   TWILIO_PHONE_NUMBER=+1XXXXXXXXXX
+//   TWILIO_ENABLED=true
+
+const getTwilioConfig = () => {
+  return {
+    accountSid: process.env.TWILIO_ACCOUNT_SID || "",
+    authToken: process.env.TWILIO_AUTH_TOKEN || "",
+    phoneNumber: process.env.TWILIO_PHONE_NUMBER || "",
+    enabled: process.env.TWILIO_ENABLED === "true",
+  };
+};
+
+// ============ TWILIO SMS HELPER ============
+
+/**
+ * Send an SMS via Twilio REST API (no SDK — native fetch).
+ * Returns the Twilio message SID on success, null on failure.
+ */
+const sendTwilioSMS = async (
+  to: string,
+  body: string
+): Promise<string | null> => {
+  const config = getTwilioConfig();
+
+  if (!config.enabled) {
+    console.log("Twilio disabled — skipping SMS");
+    return null;
+  }
+
+  if (!config.accountSid || !config.authToken || !config.phoneNumber) {
+    console.error("Twilio config incomplete:", {
+      hasSid: !!config.accountSid,
+      hasToken: !!config.authToken,
+      hasPhone: !!config.phoneNumber,
+    });
+    return null;
+  }
+
+  if (!to.match(/^\+[1-9]\d{6,14}$/)) {
+    console.error("Invalid phone number format:", to);
+    return null;
+  }
+
+  try {
+    const url = `https://api.twilio.com/2010-04-01/Accounts/${config.accountSid}/Messages.json`;
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Authorization":
+          "Basic " +
+          Buffer.from(`${config.accountSid}:${config.authToken}`).toString(
+            "base64"
+          ),
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({
+        To: to,
+        From: config.phoneNumber,
+        Body: body,
+      }).toString(),
+    });
+
+    const result = (await response.json()) as any;
+
+    if (!response.ok) {
+      console.error("Twilio API error:", JSON.stringify(result));
+      return null;
+    }
+
+    console.log(`✅ SMS sent to ${to} — SID: ${result.sid}`);
+    return result.sid;
+  } catch (error: any) {
+    console.error("Error sending SMS:", error.message);
+    return null;
+  }
+};
+
+// ============ USER PHONE LOOKUP ============
+
+const getUserPhone = async (userId: string): Promise<string | null> => {
+  try {
+    const userDoc = await db.collection("users").doc(userId).get();
+    if (!userDoc.exists) return null;
+    const data = userDoc.data();
+    return data?.phone || data?.phoneNumber || null;
+  } catch {
+    return null;
+  }
+};
+
+// ============ SEND SMS (Callable — for on-demand use from frontend) ============
+
+interface SendSMSRequest {
+  recipientId?: string;
+  phoneNumber?: string;
+  message: string;
+}
+
+export const sendSMSNotification = functions.https.onCall(
+  async (data: SendSMSRequest, context) => {
+    if (!context.auth) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "User must be authenticated to send SMS"
+      );
+    }
+
+    const {recipientId, phoneNumber, message} = data;
+
+    if (!message || (!recipientId && !phoneNumber)) {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "Missing required fields: message and either recipientId or phoneNumber"
+      );
+    }
+
+    let phone = phoneNumber || null;
+    if (!phone && recipientId) {
+      phone = await getUserPhone(recipientId);
+    }
+
+    if (!phone) {
+      throw new functions.https.HttpsError(
+        "not-found",
+        "No phone number found for recipient"
+      );
+    }
+
+    const sid = await sendTwilioSMS(phone, message);
+
+    if (!sid) {
+      throw new functions.https.HttpsError(
+        "internal",
+        "Failed to send SMS — check Twilio configuration"
+      );
+    }
+
+    return {success: true, messageSid: sid};
+  }
+);
+
 // ============ CREATE PAYMENT LINK ============
 
 interface CreatePaymentLinkRequest {
@@ -39,12 +184,12 @@ interface CreatePaymentLinkRequest {
   title: string;
   amountCents: number;
   customerEmail?: string;
+  customerPhone?: string;
   invoiceNumber: string;
 }
 
 export const createSquarePaymentLink = functions.https.onCall(
   async (data: CreatePaymentLinkRequest, context) => {
-    // Verify user is authenticated
     if (!context.auth) {
       throw new functions.https.HttpsError(
         "unauthenticated",
@@ -52,9 +197,9 @@ export const createSquarePaymentLink = functions.https.onCall(
       );
     }
 
-    const {invoiceId, title, amountCents, customerEmail, invoiceNumber} = data;
+    const {invoiceId, title, amountCents, customerEmail, customerPhone, invoiceNumber} =
+      data;
 
-    // Validate required fields
     if (!invoiceId || !title || !amountCents) {
       throw new functions.https.HttpsError(
         "invalid-argument",
@@ -62,7 +207,6 @@ export const createSquarePaymentLink = functions.https.onCall(
       );
     }
 
-    // Get Square config
     const config = getSquareConfig();
 
     if (!config.accessToken || !config.locationId) {
@@ -79,7 +223,10 @@ export const createSquarePaymentLink = functions.https.onCall(
     const baseUrl = getSquareBaseUrl(config.environment);
 
     try {
-      // Native fetch (Node 20+)
+      const prePopulatedData: Record<string, string> = {};
+      if (customerEmail) prePopulatedData.buyer_email = customerEmail;
+      if (customerPhone) prePopulatedData.buyer_phone_number = customerPhone;
+
       const response = await fetch(
         `${baseUrl}/v2/online-checkout/payment-links`,
         {
@@ -102,9 +249,10 @@ export const createSquarePaymentLink = functions.https.onCall(
             checkout_options: {
               ask_for_shipping_address: false,
             },
-            pre_populated_data: customerEmail
-              ? {buyer_email: customerEmail}
-              : undefined,
+            pre_populated_data:
+              Object.keys(prePopulatedData).length > 0
+                ? prePopulatedData
+                : undefined,
             payment_note: `Invoice ${invoiceNumber} - ${title}`,
           }),
         }
@@ -137,6 +285,15 @@ export const createSquarePaymentLink = functions.https.onCall(
         updatedAt: new Date().toISOString(),
       });
 
+      // SMS: Send pay link to client
+      if (customerPhone) {
+        const amountFormatted = `$${(amountCents / 100).toFixed(2)}`;
+        await sendTwilioSMS(
+          customerPhone,
+          `Care Construction: Invoice ${invoiceNumber} (${amountFormatted}) is ready for payment.\n\nPay here: ${paymentLink.url}`
+        );
+      }
+
       return {
         success: true,
         paymentUrl: paymentLink.url,
@@ -159,10 +316,54 @@ export const createSquarePaymentLink = functions.https.onCall(
 
 // ============ SQUARE WEBHOOK HANDLER ============
 
+const verifySquareSignature = (
+  signatureKey: string,
+  notificationUrl: string,
+  body: string,
+  signature: string
+): boolean => {
+  if (!signatureKey) return false;
+
+  const combined = notificationUrl + body;
+  const expectedSignature = crypto
+    .createHmac("sha256", signatureKey)
+    .update(combined)
+    .digest("base64");
+
+  return crypto.timingSafeEqual(
+    Buffer.from(signature),
+    Buffer.from(expectedSignature)
+  );
+};
+
 export const squareWebhook = functions.https.onRequest(async (req, res) => {
   if (req.method !== "POST") {
     res.status(405).send("Method Not Allowed");
     return;
+  }
+
+  // Verify webhook signature if key is configured
+  const config = getSquareConfig();
+  if (config.webhookSignatureKey) {
+    const signature = req.headers["x-square-hmacsha256-signature"] as string;
+    const notificationUrl =
+      (req.headers["x-square-notification-url"] as string) || "";
+    const rawBody =
+      typeof req.body === "string" ? req.body : JSON.stringify(req.body);
+
+    if (
+      !signature ||
+      !verifySquareSignature(
+        config.webhookSignatureKey,
+        notificationUrl,
+        rawBody,
+        signature
+      )
+    ) {
+      console.error("Invalid Square webhook signature");
+      res.status(403).json({error: "Invalid signature"});
+      return;
+    }
   }
 
   try {
@@ -221,6 +422,30 @@ export const squareWebhook = functions.https.onRequest(async (req, res) => {
           console.log(
             `Invoice ${invoiceDoc.id} updated: ${invoice.status} -> ${newStatus}`
           );
+
+          // SMS: Notify invoice creator
+          if (invoice.createdBy) {
+            const creatorPhone = await getUserPhone(invoice.createdBy);
+            if (creatorPhone) {
+              const amountFormatted = `$${(paymentAmount / 100).toFixed(2)}`;
+              await sendTwilioSMS(
+                creatorPhone,
+                `Care Construction: Payment of ${amountFormatted} received for Invoice ${invoice.invoiceNumber || invoiceDoc.id}. Status: ${newStatus}`
+              );
+            }
+          }
+
+          // SMS: Confirm to payer (client)
+          if (invoice.clientId) {
+            const clientPhone = await getUserPhone(invoice.clientId);
+            if (clientPhone) {
+              const amountFormatted = `$${(paymentAmount / 100).toFixed(2)}`;
+              await sendTwilioSMS(
+                clientPhone,
+                `Care Construction: Your payment of ${amountFormatted} for Invoice ${invoice.invoiceNumber || invoiceDoc.id} has been received. Thank you!`
+              );
+            }
+          }
         } else {
           console.log("No invoice found for order:", payment.order_id);
         }
@@ -274,7 +499,7 @@ export const squareWebhook = functions.https.onRequest(async (req, res) => {
 // ============ CHECK PAYMENT STATUS ============
 
 export const checkPaymentStatus = functions.https.onCall(
-  async (data: { invoiceId: string }, context) => {
+  async (data: {invoiceId: string}, context) => {
     if (!context.auth) {
       throw new functions.https.HttpsError(
         "unauthenticated",
@@ -352,5 +577,6 @@ export const checkPaymentStatus = functions.https.onCall(
   }
 );
 
-// ============ NOTIFICATION EMAIL FUNCTIONS ============
+// ============ NOTIFICATION FUNCTIONS (Email + SMS) ============
 export {sendNotificationEmail, sendDailyDigest} from "./notificationEmail";
+export { getTwilioMessages, getTwilioCalls, adminSendSMS } from "./twilioAdmin";

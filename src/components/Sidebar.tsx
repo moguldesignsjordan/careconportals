@@ -11,6 +11,7 @@ import {
   X,
   Receipt, // Added for invoices
   Calculator, // Added for budget
+  Smartphone, // Added for communications
 } from 'lucide-react';
 import { Logo } from '../constants';
 
@@ -65,6 +66,12 @@ const Sidebar: React.FC<SidebarProps> = ({
       label: 'Messages',
       icon: MessageSquare,
       roles: [UserRole.ADMIN, UserRole.CONTRACTOR, UserRole.CLIENT],
+    },
+    {
+      id: 'communications',
+      label: 'SMS & Calls',
+      icon: Smartphone,
+      roles: [UserRole.ADMIN],
     },
     {
       id: 'directory',

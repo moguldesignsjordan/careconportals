@@ -1,37 +1,21 @@
 // functions/src/notificationEmail.ts
-// Firebase Cloud Function — Send email when a notification is created
-//
-// Setup:
-//   1. cd functions && npm install nodemailer @types/nodemailer
-//   2. Add to functions/.env (same file as your Square keys):
-//        SMTP_HOST=smtp.gmail.com
-//        SMTP_PORT=587
-//        SMTP_USER=your-email@gmail.com
-//        SMTP_PASS=your-app-password
-//        SMTP_FROM=Care Construction <noreply@caregeneralconstruction.com>
-//        PORTAL_URL=https://your-portal-url.vercel.app
-//
-//   3. Add ONE export to the BOTTOM of functions/src/index.ts:
-//        export { sendNotificationEmail, sendDailyDigest } from "./notificationEmail";
-//
-//   4. Deploy: firebase deploy --only functions
+// Firebase Cloud Function — Send email + SMS when a notification is created
 
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 import * as nodemailer from "nodemailer";
 
 // ⚠️  DO NOT call admin.initializeApp() here — index.ts does it.
-//
 // ⚠️  DO NOT call admin.firestore() at the top level either.
 //     When index.ts does `export { ... } from "./notificationEmail"`,
 //     this file is loaded BEFORE initializeApp() runs, so a top-level
-//     `const db = admin.firestore()` would crash. Instead, we call it
-//     lazily inside each function body.
+//     `const db = admin.firestore()` would crash.
 
 // ── Helper: get Firestore lazily ─────────────────────────────────────
 const getDb = () => admin.firestore();
 
-// ── SMTP transporter (reads from functions/.env) ─────────────────────
+// ============ SMTP CONFIG ============
+
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST || "smtp.gmail.com",
   port: parseInt(process.env.SMTP_PORT || "587", 10),
@@ -48,18 +32,128 @@ const smtpFrom =
 const portalUrl =
   process.env.PORTAL_URL || "https://your-portal-url.vercel.app";
 
-// ── Category color mapping for email template ────────────────────────
+// ============ TWILIO CONFIG ============
+
+const getTwilioConfig = () => ({
+  accountSid: process.env.TWILIO_ACCOUNT_SID || "",
+  authToken: process.env.TWILIO_AUTH_TOKEN || "",
+  phoneNumber: process.env.TWILIO_PHONE_NUMBER || "",
+  enabled: process.env.TWILIO_ENABLED === "true",
+});
+
+// ============ TWILIO SMS HELPER ============
+
+/**
+ * Send an SMS via Twilio REST API (native fetch, no SDK).
+ * Returns the message SID on success, null on failure.
+ */
+const sendTwilioSMS = async (
+  to: string,
+  body: string
+): Promise<string | null> => {
+  const config = getTwilioConfig();
+
+  if (!config.enabled) {
+    console.log("Twilio disabled — skipping SMS");
+    return null;
+  }
+
+  if (!config.accountSid || !config.authToken || !config.phoneNumber) {
+    console.error("Twilio config incomplete:", {
+      hasSid: !!config.accountSid,
+      hasToken: !!config.authToken,
+      hasPhone: !!config.phoneNumber,
+    });
+    return null;
+  }
+
+  // Validate E.164 format
+  if (!to.match(/^\+[1-9]\d{6,14}$/)) {
+    console.error("Invalid phone number format:", to);
+    return null;
+  }
+
+  try {
+    const url = `https://api.twilio.com/2010-04-01/Accounts/${config.accountSid}/Messages.json`;
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Authorization":
+          "Basic " +
+          Buffer.from(`${config.accountSid}:${config.authToken}`).toString(
+            "base64"
+          ),
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: new URLSearchParams({
+        To: to,
+        From: config.phoneNumber,
+        Body: body,
+      }).toString(),
+    });
+
+    const result = (await response.json()) as any;
+
+    if (!response.ok) {
+      console.error("Twilio API error:", JSON.stringify(result));
+      return null;
+    }
+
+    console.log(`✅ SMS sent to ${to} — SID: ${result.sid}`);
+    return result.sid;
+  } catch (error: any) {
+    console.error("Error sending SMS:", error.message);
+    return null;
+  }
+};
+
+// ============ QUIET HOURS CHECK ============
+
+/**
+ * Returns true if current time is within the user's quiet hours window.
+ */
+const isQuietHours = (quietHours?: {
+  enabled: boolean;
+  startHour: number;
+  endHour: number;
+  timezone?: string;
+}): boolean => {
+  if (!quietHours?.enabled) return false;
+
+  const now = new Date();
+  const currentHour = now.getHours(); // Server timezone — for production use timezone-aware logic
+  const {startHour, endHour} = quietHours;
+
+  if (startHour > endHour) {
+    // Overnight window (e.g. 22:00 – 07:00)
+    return currentHour >= startHour || currentHour < endHour;
+  }
+  // Same-day window (e.g. 08:00 – 17:00)
+  return currentHour >= startHour && currentHour < endHour;
+};
+
+// ============ CATEGORY COLORS ============
+
 const CATEGORY_COLORS: Record<string, string> = {
+  PROJECT: "#F15A2B",
   project: "#F15A2B",
+  MESSAGE: "#3B82F6",
   message: "#3B82F6",
+  INVOICE: "#10B981",
   invoice: "#10B981",
+  MILESTONE: "#8B5CF6",
   milestone: "#8B5CF6",
+  DOCUMENT: "#F59E0B",
   document: "#F59E0B",
+  CALENDAR: "#14B8A6",
   calendar: "#14B8A6",
+  SYSTEM: "#6B7280",
   system: "#6B7280",
 };
 
-// ── Email HTML template ─────────────────────────────────────────────
+// ============ EMAIL TEMPLATE ============
+
 const buildEmailHtml = (data: {
   title: string;
   message: string;
@@ -69,8 +163,7 @@ const buildEmailHtml = (data: {
   ctaUrl?: string;
 }) => {
   const color = CATEGORY_COLORS[data.category] || "#F15A2B";
-  const categoryLabel =
-    data.category.charAt(0).toUpperCase() + data.category.slice(1);
+  const categoryLabel = data.category.replace("_", " ").toUpperCase();
 
   return `
 <!DOCTYPE html>
@@ -119,7 +212,7 @@ const buildEmailHtml = (data: {
               
               ${
   data.ctaUrl
-    ? `<a href="${data.ctaUrl}" style="display:inline-block; padding:10px 24px; background-color:#F15A2B; color:#ffffff; font-size:13px; font-weight:600; text-decoration:none; border-radius:10px;">View in Portal</a>`
+    ? `<a href="${data.ctaUrl}" style="display:inline-block; padding:10px 24px; background-color:#F15A2B; color:#ffffff; font-size:13px; font-weight:600; text-decoration:none; border-radius:10px;">View in Portal →</a>`
     : ""
 }
             </td>
@@ -129,7 +222,7 @@ const buildEmailHtml = (data: {
           <tr>
             <td style="padding:16px 32px; border-top:1px solid #f3f4f6;">
               <p style="margin:0; color:#d1d5db; font-size:11px; text-align:center;">
-                Care General Construction &middot; You received this because you have email notifications enabled.
+                Care General Construction &middot; You received this because you have notifications enabled.
                 <br />
                 <a href="${portalUrl}/settings" style="color:#F15A2B; text-decoration:none;">Manage preferences</a>
               </p>
@@ -144,16 +237,29 @@ const buildEmailHtml = (data: {
 </html>`;
 };
 
-// ── Cloud Function: Firestore onCreate trigger ──────────────────────
+// ============ MAIN TRIGGER: EMAIL + SMS ============
+
+/**
+ * Triggered when a new notification document is created.
+ * 1. Looks up the recipient
+ * 2. Sends email (if enabled and not in quiet hours / digest mode)
+ * 3. Sends SMS (if enabled, phone on file, and category qualifies)
+ * 4. Marks isEmailSent / isSmsSent on the notification doc
+ */
 export const sendNotificationEmail = functions.firestore
   .document("notifications/{notificationId}")
   .onCreate(async (snap, context) => {
-    const db = getDb(); // ← lazy load after initializeApp has run
+    const db = getDb();
     const notification = snap.data();
     const notificationId = context.params.notificationId;
 
+    if (!notification || !notification.recipientId) {
+      console.error("Notification missing recipientId:", notificationId);
+      return;
+    }
+
     try {
-      // 1. Get the recipient's user doc
+      // ── 1. Look up recipient (single read for both email + SMS) ──
       const recipientDoc = await db
         .collection("users")
         .doc(notification.recipientId)
@@ -161,79 +267,18 @@ export const sendNotificationEmail = functions.firestore
 
       if (!recipientDoc.exists) {
         console.log(
-          `Recipient ${notification.recipientId} not found, skipping email.`
+          `Recipient ${notification.recipientId} not found — skipping.`
         );
         return;
       }
 
       const recipient = recipientDoc.data()!;
       const recipientEmail = recipient.email;
-      const recipientName = recipient.name;
+      const recipientName = recipient.name || "there";
+      const recipientPhone = recipient.phone || recipient.phoneNumber || null;
+      const category = notification.category || "SYSTEM";
 
-      if (!recipientEmail) {
-        console.log(
-          `Recipient ${notification.recipientId} has no email, skipping.`
-        );
-        return;
-      }
-
-      // 2. Check email preferences
-      const prefs = recipient.emailNotificationPreferences || {
-        enabled: true,
-        categories: {},
-        digestMode: "instant",
-      };
-
-      // Skip if email notifications are disabled
-      if (prefs.enabled === false) {
-        console.log(
-          `Email notifications disabled for ${recipientEmail}, skipping.`
-        );
-        return;
-      }
-
-      // Skip if this category is disabled
-      const category = notification.category || "system";
-      if (prefs.categories && prefs.categories[category] === false) {
-        console.log(
-          `Category "${category}" disabled for ${recipientEmail}, skipping.`
-        );
-        return;
-      }
-
-      // Skip if digest mode is "daily" (handled by sendDailyDigest)
-      if (prefs.digestMode === "daily") {
-        console.log(
-          `Digest mode for ${recipientEmail}, deferring to daily email.`
-        );
-        return;
-      }
-
-      // 3. Check quiet hours
-      if (prefs.quietHours?.enabled) {
-        const now = new Date();
-        const currentHour = now.getHours();
-        const {startHour, endHour} = prefs.quietHours;
-
-        if (startHour > endHour) {
-          // Overnight (e.g. 22:00 - 07:00)
-          if (currentHour >= startHour || currentHour < endHour) {
-            console.log(
-              `Quiet hours active for ${recipientEmail}, skipping.`
-            );
-            return;
-          }
-        } else {
-          if (currentHour >= startHour && currentHour < endHour) {
-            console.log(
-              `Quiet hours active for ${recipientEmail}, skipping.`
-            );
-            return;
-          }
-        }
-      }
-
-      // 4. Build the portal URL for the CTA button
+      // Build portal link (shared by email CTA and potential SMS link)
       let ctaUrl = portalUrl;
       if (notification.link?.view) {
         ctaUrl = `${portalUrl}?view=${notification.link.view}`;
@@ -242,43 +287,129 @@ export const sendNotificationEmail = functions.firestore
         }
       }
 
-      // 5. Send the email
-      const htmlContent = buildEmailHtml({
-        title: notification.title,
-        message: notification.message,
-        category,
-        senderName: notification.senderName,
-        recipientName,
-        ctaUrl,
-      });
+      // Track what we sent
+      const updateFields: Record<string, any> = {};
 
-      await transporter.sendMail({
-        from: smtpFrom,
-        to: recipientEmail,
-        subject: `${notification.title} — Care Construction`,
-        html: htmlContent,
-      });
+      // ── 2. EMAIL ──────────────────────────────────────────────────
+      const emailPrefs = recipient.emailNotificationPreferences || {
+        enabled: true,
+        categories: {},
+        digestMode: "instant",
+      };
 
-      console.log(
-        `✅ Email sent to ${recipientEmail} for notification ${notificationId}`
-      );
+      let emailSent = false;
 
-      // 6. Mark the notification as email-sent
-      await snap.ref.update({isEmailSent: true});
+      const shouldSendEmail =
+        emailPrefs.enabled !== false &&
+        emailPrefs.categories?.[category] !== false &&
+        emailPrefs.digestMode !== "daily" &&
+        !isQuietHours(emailPrefs.quietHours) &&
+        !!recipientEmail;
+
+      if (shouldSendEmail) {
+        try {
+          const htmlContent = buildEmailHtml({
+            title: notification.title,
+            message: notification.message,
+            category,
+            senderName: notification.senderName,
+            recipientName,
+            ctaUrl,
+          });
+
+          await transporter.sendMail({
+            from: smtpFrom,
+            to: recipientEmail,
+            subject: `${notification.title} — Care Construction`,
+            html: htmlContent,
+          });
+
+          emailSent = true;
+          updateFields.isEmailSent = true;
+          console.log(
+            `✅ Email sent to ${recipientEmail} for ${notificationId}`
+          );
+        } catch (emailError) {
+          console.error(
+            `❌ Email failed for ${notificationId}:`,
+            emailError
+          );
+        }
+      } else {
+        console.log(
+          `Skipping email for ${notificationId} — ` +
+          `enabled:${emailPrefs.enabled}, cat:${category}, ` +
+          `digest:${emailPrefs.digestMode}, hasEmail:${!!recipientEmail}`
+        );
+      }
+
+      // ── 3. SMS ────────────────────────────────────────────────────
+      const smsPrefs = recipient.smsNotificationPreferences || {
+        enabled: false, // Opt-in by default
+        categories: {},
+      };
+
+      // Categories that warrant an SMS (keep SMS for important stuff)
+      const smsCategoryWhitelist = [
+        "INVOICE", "PROJECT", "MILESTONE", "CALENDAR", "SYSTEM",
+      ];
+      // Priorities that always get SMS regardless of category
+      const smsAlwaysPriorities = ["high", "urgent"];
+
+      const categoryQualifies =
+        smsCategoryWhitelist.includes(category.toUpperCase()) ||
+        smsAlwaysPriorities.includes(notification.priority);
+
+      const shouldSendSMS =
+        smsPrefs.enabled === true &&
+        smsPrefs.categories?.[category] !== false &&
+        categoryQualifies &&
+        !isQuietHours(smsPrefs.quietHours) &&
+        !!recipientPhone;
+
+      if (shouldSendSMS) {
+        // Build SMS body — keep concise (160 char segments)
+        const smsBody = `Care Construction: ${notification.title}\n${notification.message}`.slice(
+          0,
+          320
+        );
+
+        const sid = await sendTwilioSMS(recipientPhone, smsBody);
+
+        if (sid) {
+          updateFields.isSmsSent = true;
+          updateFields.smsSid = sid;
+          console.log(
+            `✅ SMS sent to ${recipientPhone} for ${notificationId}`
+          );
+        }
+      } else {
+        console.log(
+          `Skipping SMS for ${notificationId} — ` +
+          `enabled:${smsPrefs.enabled}, cat:${category}, ` +
+          `qualifies:${categoryQualifies}, hasPhone:${!!recipientPhone}`
+        );
+      }
+
+      // ── 4. Update notification doc ────────────────────────────────
+      if (Object.keys(updateFields).length > 0) {
+        await snap.ref.update(updateFields);
+      }
     } catch (error) {
       console.error(
-        `❌ Failed to send email for notification ${notificationId}:`,
+        `❌ Notification handler failed for ${notificationId}:`,
         error
       );
     }
   });
 
-// ── Optional: Daily digest scheduled function ───────────────────────
+// ============ DAILY DIGEST (Email + SMS summary) ============
+
 export const sendDailyDigest = functions.pubsub
   .schedule("every day 08:00")
   .timeZone("America/New_York")
   .onRun(async () => {
-    const db = getDb(); // ← lazy load after initializeApp has run
+    const db = getDb();
 
     try {
       // Get all users with daily digest enabled
@@ -308,7 +439,7 @@ export const sendDailyDigest = functions.pubsub
 
         const notifications = notificationsSnapshot.docs.map((d) => d.data());
 
-        // Build digest email
+        // ── Build digest email ──
         const notificationList = notifications
           .map(
             (n) =>
@@ -338,7 +469,7 @@ export const sendDailyDigest = functions.pubsub
           <ul style="padding-left:16px; color:#374151; font-size:13px; line-height:1.6;">
             ${notificationList}
           </ul>
-          <a href="${portalUrl}" style="display:inline-block; margin-top:16px; padding:10px 24px; background:#F15A2B; color:#fff; font-size:13px; font-weight:600; text-decoration:none; border-radius:10px;">Open Portal</a>
+          <a href="${portalUrl}" style="display:inline-block; margin-top:16px; padding:10px 24px; background:#F15A2B; color:#fff; font-size:13px; font-weight:600; text-decoration:none; border-radius:10px;">Open Portal →</a>
         </td></tr>
         <tr><td style="padding:16px 32px; border-top:1px solid #f3f4f6;">
           <p style="margin:0; color:#d1d5db; font-size:11px; text-align:center;">
@@ -351,6 +482,7 @@ export const sendDailyDigest = functions.pubsub
 </body>
 </html>`;
 
+        // Send digest email
         await transporter.sendMail({
           from: smtpFrom,
           to: userData.email,
@@ -359,6 +491,19 @@ export const sendDailyDigest = functions.pubsub
             `${notifications.length > 1 ? "s" : ""} — Care Construction`,
           html: digestHtml,
         });
+
+        // ── Optional: Send SMS digest summary ──
+        const smsPrefs = userData.smsNotificationPreferences;
+        const userPhone = userData.phone || userData.phoneNumber;
+
+        if (smsPrefs?.enabled && userPhone) {
+          const smsDigest =
+            `Care Construction Daily Digest: You have ${notifications.length} ` +
+            `new notification${notifications.length > 1 ? "s" : ""}. ` +
+            `Open your portal to review.`;
+
+          await sendTwilioSMS(userPhone, smsDigest);
+        }
 
         // Mark all as emailed
         const batch = db.batch();

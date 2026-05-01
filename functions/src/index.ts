@@ -462,3 +462,6 @@ export { smsStatusCallback, getConversationStats } from "./twilio/statusCallback
 
 // Twilio Call Recordings + Transcriptions
 export { getCallRecordings, getRecordingAudio, requestTranscription } from "./twilio/callRecordings";
+
+// VAPI AI Call Data (recordings, transcripts, summaries)
+export { getVapiCallByTwilioSid, getVapiCallById, listVapiCalls } from "./twilio/vapiIntegration";

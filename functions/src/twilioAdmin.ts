@@ -1,14 +1,14 @@
 // functions/src/twilioAdmin.ts
 // Admin-facing Twilio functions: message history, call logs, send SMS
-// Exports to add to index.ts:
-//   export { getTwilioMessages, getTwilioCalls, adminSendSMS } from "./twilioAdmin";
+// Exports: getTwilioMessages, getTwilioCalls, adminSendSMS
 
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
 
 const getDb = () => admin.firestore();
 
-// ── Twilio config (shared with index.ts) ─────────────────────────────
+// ── Twilio config ────────────────────────────────────────────────────
+
 const getTwilioConfig = () => ({
   accountSid: process.env.TWILIO_ACCOUNT_SID || "",
   authToken: process.env.TWILIO_AUTH_TOKEN || "",
@@ -17,13 +17,16 @@ const getTwilioConfig = () => ({
 });
 
 const twilioAuthHeader = () => {
-  const {accountSid, authToken} = getTwilioConfig();
+  const { accountSid, authToken } = getTwilioConfig();
   return (
     "Basic " + Buffer.from(`${accountSid}:${authToken}`).toString("base64")
   );
 };
 
 // ── Verify caller is admin ───────────────────────────────────────────
+// FIX: Uses "ADMIN" (uppercase) to match the UserRole enum in Firestore.
+// The original had "admin" (lowercase) which caused every call to fail.
+
 const verifyAdmin = async (context: functions.https.CallableContext) => {
   if (!context.auth) {
     throw new functions.https.HttpsError(
@@ -31,29 +34,28 @@ const verifyAdmin = async (context: functions.https.CallableContext) => {
       "User must be authenticated"
     );
   }
-
   const db = getDb();
   const userDoc = await db.collection("users").doc(context.auth.uid).get();
+  const userData = userDoc.data();
 
-  if (!userDoc.exists || userDoc.data()?.role !== "admin") {
+  if (!userDoc.exists || userData?.role !== "ADMIN") {
     throw new functions.https.HttpsError(
       "permission-denied",
-      "Only admins can access Twilio logs"
+      "Only admins can access Twilio functions"
     );
   }
-
-  return userDoc.data()!;
+  return userData;
 };
 
-// ============ GET TWILIO MESSAGES ============
+// ── Get Twilio Message History ───────────────────────────────────────
 
 interface GetMessagesRequest {
   pageSize?: number;
-  pageToken?: string; // Twilio uses URI for pagination
-  direction?: "inbound" | "outbound" | "all";
-  dateSentAfter?: string; // ISO date
-  dateSentBefore?: string; // ISO date
-  searchPhone?: string; // Filter by phone number
+  pageToken?: string;
+  dateSentAfter?: string;
+  dateSentBefore?: string;
+  direction?: "inbound" | "outbound-api" | "outbound-call" | "outbound-reply" | "all";
+  searchPhone?: string;
 }
 
 export const getTwilioMessages = functions.https.onCall(
@@ -61,7 +63,6 @@ export const getTwilioMessages = functions.https.onCall(
     await verifyAdmin(context);
 
     const config = getTwilioConfig();
-
     if (!config.enabled || !config.accountSid) {
       throw new functions.https.HttpsError(
         "failed-precondition",
@@ -72,35 +73,24 @@ export const getTwilioMessages = functions.https.onCall(
     const pageSize = Math.min(data.pageSize || 50, 100);
 
     try {
-      // Build query parameters
       const params = new URLSearchParams();
       params.set("PageSize", String(pageSize));
+      if (data.dateSentAfter) params.set("DateSent>", data.dateSentAfter);
+      if (data.dateSentBefore) params.set("DateSent<", data.dateSentBefore);
 
-      if (data.dateSentAfter) {
-        params.set("DateSent>", data.dateSentAfter);
-      }
-      if (data.dateSentBefore) {
-        params.set("DateSent<", data.dateSentBefore);
-      }
-
-      // Fetch from Twilio Messages API
       let url: string;
       if (data.pageToken) {
-        // Twilio pagination uses full URIs
-        url = data.pageToken;
+        url = data.pageToken; // Twilio pagination uses full URIs
       } else {
         url = `https://api.twilio.com/2010-04-01/Accounts/${config.accountSid}/Messages.json?${params.toString()}`;
       }
 
       const response = await fetch(url, {
         method: "GET",
-        headers: {
-          Authorization: twilioAuthHeader(),
-        },
+        headers: { Authorization: twilioAuthHeader() },
       });
 
       const result = (await response.json()) as any;
-
       if (!response.ok) {
         console.error("Twilio Messages API error:", JSON.stringify(result));
         throw new functions.https.HttpsError(
@@ -109,15 +99,14 @@ export const getTwilioMessages = functions.https.onCall(
         );
       }
 
-      // Filter by direction if specified
       let messages = result.messages || [];
+
+      // Filter by direction
       if (data.direction && data.direction !== "all") {
-        messages = messages.filter(
-          (m: any) => m.direction === data.direction
-        );
+        messages = messages.filter((m: any) => m.direction === data.direction);
       }
 
-      // Filter by phone number if specified
+      // Filter by phone number
       if (data.searchPhone) {
         const search = data.searchPhone.replace(/\D/g, "");
         messages = messages.filter(
@@ -127,7 +116,6 @@ export const getTwilioMessages = functions.https.onCall(
         );
       }
 
-      // Map to clean format
       const cleaned = messages.map((m: any) => ({
         sid: m.sid,
         from: m.from,
@@ -166,14 +154,14 @@ export const getTwilioMessages = functions.https.onCall(
   }
 );
 
-// ============ GET TWILIO CALLS ============
+// ── Get Twilio Call Logs ─────────────────────────────────────────────
 
 interface GetCallsRequest {
   pageSize?: number;
   pageToken?: string;
   startTimeAfter?: string;
   startTimeBefore?: string;
-  status?: string; // completed, busy, no-answer, canceled, failed
+  status?: string;
   searchPhone?: string;
 }
 
@@ -182,7 +170,6 @@ export const getTwilioCalls = functions.https.onCall(
     await verifyAdmin(context);
 
     const config = getTwilioConfig();
-
     if (!config.enabled || !config.accountSid) {
       throw new functions.https.HttpsError(
         "failed-precondition",
@@ -195,16 +182,9 @@ export const getTwilioCalls = functions.https.onCall(
     try {
       const params = new URLSearchParams();
       params.set("PageSize", String(pageSize));
-
-      if (data.startTimeAfter) {
-        params.set("StartTime>", data.startTimeAfter);
-      }
-      if (data.startTimeBefore) {
-        params.set("StartTime<", data.startTimeBefore);
-      }
-      if (data.status) {
-        params.set("Status", data.status);
-      }
+      if (data.startTimeAfter) params.set("StartTime>", data.startTimeAfter);
+      if (data.startTimeBefore) params.set("StartTime<", data.startTimeBefore);
+      if (data.status) params.set("Status", data.status);
 
       let url: string;
       if (data.pageToken) {
@@ -215,13 +195,10 @@ export const getTwilioCalls = functions.https.onCall(
 
       const response = await fetch(url, {
         method: "GET",
-        headers: {
-          Authorization: twilioAuthHeader(),
-        },
+        headers: { Authorization: twilioAuthHeader() },
       });
 
       const result = (await response.json()) as any;
-
       if (!response.ok) {
         console.error("Twilio Calls API error:", JSON.stringify(result));
         throw new functions.https.HttpsError(
@@ -232,7 +209,6 @@ export const getTwilioCalls = functions.https.onCall(
 
       let calls = result.calls || [];
 
-      // Filter by phone if specified
       if (data.searchPhone) {
         const search = data.searchPhone.replace(/\D/g, "");
         calls = calls.filter(
@@ -278,20 +254,19 @@ export const getTwilioCalls = functions.https.onCall(
   }
 );
 
-// ============ ADMIN SEND SMS ============
+// ── Admin Send SMS (with audit log) ──────────────────────────────────
 
-interface AdminSendSMSRequest {
-  to: string; // E.164 phone number
+interface AdminSendSmsRequest {
+  to: string;
   message: string;
-  recipientName?: string; // For logging
+  recipientName?: string;
 }
 
 export const adminSendSMS = functions.https.onCall(
-  async (data: AdminSendSMSRequest, context) => {
+  async (data: AdminSendSmsRequest, context) => {
     const adminUser = await verifyAdmin(context);
 
     const config = getTwilioConfig();
-
     if (!config.enabled || !config.accountSid) {
       throw new functions.https.HttpsError(
         "failed-precondition",
@@ -299,8 +274,7 @@ export const adminSendSMS = functions.https.onCall(
       );
     }
 
-    const {to, message, recipientName} = data;
-
+    const { to, message, recipientName } = data;
     if (!to || !message) {
       throw new functions.https.HttpsError(
         "invalid-argument",
@@ -324,7 +298,6 @@ export const adminSendSMS = functions.https.onCall(
 
     try {
       const url = `https://api.twilio.com/2010-04-01/Accounts/${config.accountSid}/Messages.json`;
-
       const response = await fetch(url, {
         method: "POST",
         headers: {
@@ -339,7 +312,6 @@ export const adminSendSMS = functions.https.onCall(
       });
 
       const result = (await response.json()) as any;
-
       if (!response.ok) {
         console.error("Twilio send error:", JSON.stringify(result));
         throw new functions.https.HttpsError(
@@ -348,7 +320,7 @@ export const adminSendSMS = functions.https.onCall(
         );
       }
 
-      // Log the outbound SMS to Firestore for audit trail
+      // Audit log
       const db = getDb();
       await db.collection("smsLogs").add({
         sid: result.sid,

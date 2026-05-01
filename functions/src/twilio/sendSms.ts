@@ -1,30 +1,25 @@
+// functions/src/twilio/sendSms.ts
+// Conversational SMS: sends messages and manages smsConversations + smsMessages
+
 import * as functions from "firebase-functions";
 import * as admin from "firebase-admin";
-import {getTwilioClient, getTwilioConfig, formatPhoneNumber} from "./config";
- 
+import { getTwilioConfig, getTwilioClient, formatPhoneNumber } from "./config";
+
 // ── Lazy Firestore ───────────────────────────────────────────────────
 const getDb = () => admin.firestore();
- 
-// ── Types ────────────────────────────────────────────────────────────
-interface SendSmsRequest {
-  to: string; // Phone number to send to
-  body: string; // Message content
-  recipientUserId?: string; // Optional: linked portal user ID
-  projectId?: string; // Optional: associated project
-  conversationId?: string; // Optional: existing conversation ID
-}
- 
-interface SendSmsResponse {
-  success: boolean;
-  messageId?: string;
-  conversationId?: string;
-  twilioSid?: string;
-  error?: string;
-}
- 
+
 // ── Main Cloud Function ──────────────────────────────────────────────
+
+interface SendSmsData {
+  to: string;
+  body: string;
+  recipientUserId?: string;
+  projectId?: string;
+  conversationId?: string;
+}
+
 export const sendSms = functions.https.onCall(
-  async (data: SendSmsRequest, context): Promise<SendSmsResponse> => {
+  async (data: SendSmsData, context) => {
     // 1. Verify authentication
     if (!context.auth) {
       throw new functions.https.HttpsError(
@@ -32,26 +27,25 @@ export const sendSms = functions.https.onCall(
         "User must be authenticated to send SMS"
       );
     }
- 
+
     const senderId = context.auth.uid;
- 
+
     // 2. Validate input
-    const {to, body, recipientUserId, projectId, conversationId} = data;
- 
+    const { to, body, recipientUserId, projectId, conversationId } = data;
     if (!to || !body) {
       throw new functions.https.HttpsError(
         "invalid-argument",
         "Missing required fields: to, body"
       );
     }
- 
+
     if (body.length > 1600) {
       throw new functions.https.HttpsError(
         "invalid-argument",
         "Message too long. Maximum 1600 characters."
       );
     }
- 
+
     // 3. Get Twilio config
     const config = getTwilioConfig();
     if (!config.phoneNumber) {
@@ -60,11 +54,11 @@ export const sendSms = functions.https.onCall(
         "Twilio phone number not configured"
       );
     }
- 
+
     const db = getDb();
     const toFormatted = formatPhoneNumber(to);
     const fromNumber = config.phoneNumber;
- 
+
     try {
       // 4. Send SMS via Twilio
       const client = getTwilioClient();
@@ -72,22 +66,20 @@ export const sendSms = functions.https.onCall(
         to: toFormatted,
         from: fromNumber,
         body: body,
-        statusCallback: `${config.portalUrl}/api/twilio/status`, // Optional webhook
+        statusCallback: `${config.portalUrl}/api/twilio/status`,
       });
- 
+
       console.log(`SMS sent: ${twilioMessage.sid} to ${toFormatted}`);
- 
+
       // 5. Find or create conversation
       let convId = conversationId;
- 
       if (!convId) {
-        // Look for existing conversation with this phone number
         const existingConv = await db
           .collection("smsConversations")
           .where("participantPhone", "==", toFormatted)
           .limit(1)
           .get();
- 
+
         if (!existingConv.empty) {
           convId = existingConv.docs[0].id;
         } else {
@@ -95,7 +87,7 @@ export const sendSms = functions.https.onCall(
           const newConv = await db.collection("smsConversations").add({
             participantPhone: toFormatted,
             portalUserId: recipientUserId || null,
-            portalUserName: null, // Will be populated if user is matched
+            portalUserName: null,
             twilioNumber: fromNumber,
             projectId: projectId || null,
             lastMessageAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -106,7 +98,7 @@ export const sendSms = functions.https.onCall(
             createdBy: senderId,
           });
           convId = newConv.id;
- 
+
           // If recipientUserId provided, fetch their name
           if (recipientUserId) {
             const userDoc = await db
@@ -122,7 +114,7 @@ export const sendSms = functions.https.onCall(
           }
         }
       }
- 
+
       // 6. Create message record
       const messageRef = await db.collection("smsMessages").add({
         conversationId: convId,
@@ -131,7 +123,7 @@ export const sendSms = functions.https.onCall(
         to: toFormatted,
         body: body,
         twilioSid: twilioMessage.sid,
-        status: twilioMessage.status, // "queued", "sent", etc.
+        status: twilioMessage.status,
         sentBy: senderId,
         projectId: projectId || null,
         createdAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -140,14 +132,17 @@ export const sendSms = functions.https.onCall(
           twilioNumSegments: twilioMessage.numSegments,
         },
       });
- 
+
       // 7. Update conversation with latest message
-      await db.collection("smsConversations").doc(convId).update({
-        lastMessageAt: admin.firestore.FieldValue.serverTimestamp(),
-        lastMessagePreview: body.slice(0, 100),
-        lastMessageDirection: "outbound",
-      });
- 
+      await db
+        .collection("smsConversations")
+        .doc(convId!)
+        .update({
+          lastMessageAt: admin.firestore.FieldValue.serverTimestamp(),
+          lastMessagePreview: body.slice(0, 100),
+          lastMessageDirection: "outbound",
+        });
+
       return {
         success: true,
         messageId: messageRef.id,
@@ -156,7 +151,7 @@ export const sendSms = functions.https.onCall(
       };
     } catch (error: any) {
       console.error("Error sending SMS:", error);
- 
+
       // Handle specific Twilio errors
       if (error.code === 21211) {
         throw new functions.https.HttpsError(
@@ -176,7 +171,7 @@ export const sendSms = functions.https.onCall(
           "Cannot send SMS to this region"
         );
       }
- 
+
       throw new functions.https.HttpsError(
         "internal",
         error.message || "Failed to send SMS"
@@ -184,71 +179,66 @@ export const sendSms = functions.https.onCall(
     }
   }
 );
- 
-// ── Bulk SMS (for notifications) ─────────────────────────────────────
-interface BulkSmsRequest {
-  recipients: Array<{
-    phone: string;
-    userId?: string;
-    name?: string;
-  }>;
+
+// ── Bulk SMS (admin-only) ────────────────────────────────────────────
+
+interface BulkSmsData {
+  recipients: { phone: string; name?: string }[];
   body: string;
   projectId?: string;
 }
- 
+
 export const sendBulkSms = functions.https.onCall(
-  async (data: BulkSmsRequest, context) => {
+  async (data: BulkSmsData, context) => {
     if (!context.auth) {
       throw new functions.https.HttpsError(
         "unauthenticated",
         "User must be authenticated"
       );
     }
- 
-    // Verify admin role (bulk SMS is admin-only)
+
+    // Verify admin role
     const db = getDb();
-    const senderDoc = await db.collection("users").doc(context.auth.uid).get();
+    const senderDoc = await db
+      .collection("users")
+      .doc(context.auth.uid)
+      .get();
     const senderData = senderDoc.data();
- 
-    if (senderData?.role !== "admin") {
+    if (senderData?.role !== "ADMIN") {
       throw new functions.https.HttpsError(
         "permission-denied",
         "Only admins can send bulk SMS"
       );
     }
- 
-    const {recipients, body, projectId} = data;
- 
+
+    const { recipients, body, projectId } = data;
     if (!recipients || recipients.length === 0 || !body) {
       throw new functions.https.HttpsError(
         "invalid-argument",
         "Missing recipients or message body"
       );
     }
- 
+
     if (recipients.length > 100) {
       throw new functions.https.HttpsError(
         "invalid-argument",
         "Maximum 100 recipients per bulk send"
       );
     }
- 
-    const results: Array<{phone: string; success: boolean; error?: string}> =
-      [];
+
+    const results: { phone: string; success: boolean; error?: string }[] = [];
     const client = getTwilioClient();
     const config = getTwilioConfig();
- 
+
     for (const recipient of recipients) {
       try {
         const toFormatted = formatPhoneNumber(recipient.phone);
- 
         await client.messages.create({
           to: toFormatted,
           from: config.phoneNumber,
           body: body,
         });
- 
-        results.push({phone: recipient.phone, success: true});
+        results.push({ phone: recipient.phone, success: true });
       } catch (error: any) {
         results.push({
           phone: recipient.phone,
@@ -257,10 +247,10 @@ export const sendBulkSms = functions.https.onCall(
         });
       }
     }
- 
+
     const successCount = results.filter((r) => r.success).length;
     console.log(`Bulk SMS: ${successCount}/${recipients.length} sent`);
- 
+
     return {
       success: true,
       totalSent: successCount,

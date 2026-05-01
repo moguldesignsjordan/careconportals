@@ -12,6 +12,9 @@ import {
   X,
   Check,
   Hash,
+  Phone,
+  Smartphone,
+  MessageCircle,
 } from 'lucide-react';
 import { User, Message, Project, UserRole } from '../types';
 
@@ -26,19 +29,23 @@ export interface GroupChat {
   createdAt: Date | any;
 }
 
-// Extended message type to support group messages
+// Extended message type to support group messages + SMS channel
 export interface GroupMessage extends Omit<Message, 'receiverId'> {
   receiverId?: string;
   groupId?: string;
+  channel?: 'in-app' | 'sms';
+  direction?: 'inbound' | 'outbound';
+  twilioSid?: string;
 }
 
 interface MessagingProps {
   currentUser: User;
   users: User[];
-  messages: Message[];
+  messages: (Message & { channel?: 'in-app' | 'sms'; direction?: string; twilioSid?: string })[];
   projects: Project[];
   onSendMessage: (receiverId: string, content: string, projectId?: string) => Promise<void>;
   onSendGroupMessage?: (groupId: string, content: string, projectId?: string) => Promise<void>;
+  onSendSms?: (recipientUserId: string, content: string, projectId?: string) => Promise<void>;
   groupChats?: GroupChat[];
   groupMessages?: GroupMessage[];
   onCreateGroup?: (name: string, memberIds: string[], projectId?: string) => Promise<void>;
@@ -56,6 +63,7 @@ const Messaging: React.FC<MessagingProps> = ({
   projects,
   onSendMessage,
   onSendGroupMessage,
+  onSendSms,
   groupChats = [],
   groupMessages = [],
   onCreateGroup,
@@ -70,6 +78,9 @@ const Messaging: React.FC<MessagingProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [inputText, setInputText] = useState('');
   const [sending, setSending] = useState(false);
+
+  // SMS mode toggle (admin-only)
+  const [smsMode, setSmsMode] = useState(false);
 
   // @mention state
   const [mentionQuery, setMentionQuery] = useState('');
@@ -89,6 +100,21 @@ const Messaging: React.FC<MessagingProps> = ({
   // Backward compat: derive activeChat for DM logic
   const activeChat = activeTarget?.type === 'user' ? activeTarget.data : null;
   const activeGroup = activeTarget?.type === 'group' ? activeTarget.data : null;
+
+  // Can the current admin send SMS to the active chat user?
+  const canSendSms = useMemo(() => {
+    if (currentUser.role !== UserRole.ADMIN) return false;
+    if (!onSendSms) return false;
+    if (!activeChat) return false;
+    return Boolean(activeChat.phone?.trim());
+  }, [currentUser.role, onSendSms, activeChat]);
+
+  // Reset SMS mode when switching chats or when SMS isn't available
+  useEffect(() => {
+    if (!canSendSms) {
+      setSmsMode(false);
+    }
+  }, [canSendSms, activeTarget]);
 
   // ============ CONTACTS FILTERING ============
 
@@ -176,7 +202,7 @@ const Messaging: React.FC<MessagingProps> = ({
   // ============ CONTACT METADATA ============
 
   const contactsWithMeta = useMemo(() => {
-    const map = new Map<string, Message[]>();
+    const map = new Map<string, (typeof messages)[number][]>();
 
     messages.forEach((m) => {
       const isCurrentSender = m.senderId === currentUser.id;
@@ -477,7 +503,12 @@ const Messaging: React.FC<MessagingProps> = ({
     const content = inputText.trim();
     setSending(true);
     try {
-      await onSendMessage(activeChat.id, content, activeProjectId || undefined);
+      // SMS mode: route through Twilio
+      if (smsMode && onSendSms) {
+        await onSendSms(activeChat.id, content, activeProjectId || undefined);
+      } else {
+        await onSendMessage(activeChat.id, content, activeProjectId || undefined);
+      }
       setInputText('');
       setShowMentionDropdown(false);
       setMentionQuery('');
@@ -687,6 +718,8 @@ const Messaging: React.FC<MessagingProps> = ({
 
               {filteredContacts.map(({ user, lastMessage }) => {
                 const roleBadge = getRoleBadge(user.role);
+                const hasPhone = Boolean(user.phone?.trim());
+                const lastWasSms = (lastMessage as any)?.channel === 'sms';
                 return (
                   <button
                     key={user.id}
@@ -698,8 +731,16 @@ const Messaging: React.FC<MessagingProps> = ({
                       activeChat?.id === user.id ? 'bg-care-orange/5' : ''
                     }`}
                   >
-                    <div className="h-9 w-9 rounded-xl bg-gray-100 flex items-center justify-center text-xs font-semibold text-gray-700">
-                      {user.name.charAt(0).toUpperCase()}
+                    <div className="relative">
+                      <div className="h-9 w-9 rounded-xl bg-gray-100 flex items-center justify-center text-xs font-semibold text-gray-700">
+                        {user.name.charAt(0).toUpperCase()}
+                      </div>
+                      {/* Phone indicator for admin */}
+                      {currentUser.role === UserRole.ADMIN && hasPhone && (
+                        <div className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full bg-emerald-500 flex items-center justify-center ring-2 ring-white">
+                          <Phone size={7} className="text-white" />
+                        </div>
+                      )}
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
@@ -713,7 +754,10 @@ const Messaging: React.FC<MessagingProps> = ({
                         </span>
                       </div>
                       {lastMessage && (
-                        <p className="text-[11px] text-gray-500 truncate">
+                        <p className="text-[11px] text-gray-500 truncate flex items-center gap-1">
+                          {lastWasSms && (
+                            <Smartphone size={9} className="text-emerald-500 flex-shrink-0" />
+                          )}
                           {lastMessage.senderId === currentUser.id ? 'You: ' : ''}
                           {lastMessage.content}
                         </p>
@@ -992,8 +1036,15 @@ const Messaging: React.FC<MessagingProps> = ({
 
               {/* Avatar */}
               {activeChat && (
-                <div className="h-9 w-9 rounded-xl bg-gray-100 flex items-center justify-center text-xs font-semibold text-gray-700">
-                  {activeChat.name.charAt(0).toUpperCase()}
+                <div className="relative">
+                  <div className="h-9 w-9 rounded-xl bg-gray-100 flex items-center justify-center text-xs font-semibold text-gray-700">
+                    {activeChat.name.charAt(0).toUpperCase()}
+                  </div>
+                  {currentUser.role === UserRole.ADMIN && activeChat.phone && (
+                    <div className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 rounded-full bg-emerald-500 flex items-center justify-center ring-2 ring-white">
+                      <Phone size={7} className="text-white" />
+                    </div>
+                  )}
                 </div>
               )}
               {activeGroup && (
@@ -1033,6 +1084,11 @@ const Messaging: React.FC<MessagingProps> = ({
                     </div>
                     <p className="text-[11px] text-gray-400 truncate">
                       {activeChat.email}
+                      {currentUser.role === UserRole.ADMIN && activeChat.phone && (
+                        <span className="ml-2 text-emerald-500">
+                          · {activeChat.phone}
+                        </span>
+                      )}
                     </p>
                   </>
                 )}
@@ -1087,9 +1143,10 @@ const Messaging: React.FC<MessagingProps> = ({
                 </div>
               )}
 
-              {chatMessages.map((m) => {
+              {chatMessages.map((m: any) => {
                 const isMine = m.senderId === currentUser.id;
                 const sender = activeGroup ? getUserById(m.senderId) : null;
+                const isSms = m.channel === 'sms';
 
                 return (
                   <div
@@ -1124,7 +1181,9 @@ const Messaging: React.FC<MessagingProps> = ({
                       <div
                         className={`px-4 py-2.5 rounded-2xl text-xs leading-relaxed ${
                           isMine
-                            ? 'bg-care-orange text-white rounded-br-sm'
+                            ? isSms
+                              ? 'bg-emerald-600 text-white rounded-br-sm'
+                              : 'bg-care-orange text-white rounded-br-sm'
                             : 'bg-white text-gray-900 rounded-bl-sm'
                         }`}
                       >
@@ -1132,10 +1191,19 @@ const Messaging: React.FC<MessagingProps> = ({
                           {renderMessageContent(m.content, isMine)}
                         </p>
                         <div
-                          className={`mt-1 text-[10px] ${
-                            isMine ? 'text-white/80 text-right' : 'text-gray-400'
+                          className={`mt-1 flex items-center gap-1.5 text-[10px] ${
+                            isMine ? 'text-white/80 justify-end' : 'text-gray-400'
                           }`}
                         >
+                          {/* SMS channel badge */}
+                          {isSms && (
+                            <span className={`inline-flex items-center gap-0.5 ${
+                              isMine ? 'text-white/70' : 'text-emerald-500'
+                            }`}>
+                              <Smartphone size={9} />
+                              SMS
+                            </span>
+                          )}
                           {formatTime(m.timestamp)}
                         </div>
                       </div>
@@ -1148,6 +1216,22 @@ const Messaging: React.FC<MessagingProps> = ({
 
             {/* Input */}
             <div className="border-t border-gray-100 p-3 bg-white relative">
+              {/* SMS mode indicator */}
+              {smsMode && (
+                <div className="mb-2 flex items-center gap-2 px-3 py-1.5 bg-emerald-50 rounded-lg border border-emerald-200">
+                  <Smartphone size={12} className="text-emerald-600" />
+                  <span className="text-[11px] font-semibold text-emerald-700">
+                    Sending as SMS to {activeChat?.phone}
+                  </span>
+                  <button
+                    onClick={() => setSmsMode(false)}
+                    className="ml-auto text-emerald-500 hover:text-emerald-700"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              )}
+
               {/* Mention dropdown */}
               {showMentionDropdown && mentionSuggestions.length > 0 && (
                 <div className="absolute bottom-14 left-3 right-3 bg-white border border-gray-200 rounded-xl shadow-lg max-h-48 overflow-y-auto z-10">
@@ -1199,6 +1283,21 @@ const Messaging: React.FC<MessagingProps> = ({
               )}
 
               <div className="flex items-end gap-2">
+                {/* SMS toggle button (admin-only, DM with phone user) */}
+                {canSendSms && (
+                  <button
+                    onClick={() => setSmsMode((prev) => !prev)}
+                    title={smsMode ? 'Switch to in-app message' : 'Send as SMS'}
+                    className={`h-9 w-9 rounded-xl flex items-center justify-center flex-shrink-0 transition-all ${
+                      smsMode
+                        ? 'bg-emerald-500 text-white shadow-md shadow-emerald-500/30'
+                        : 'bg-gray-100 text-gray-500 hover:bg-emerald-50 hover:text-emerald-600'
+                    }`}
+                  >
+                    {smsMode ? <Smartphone size={15} /> : <MessageCircle size={15} />}
+                  </button>
+                )}
+
                 <div className="flex-1 relative">
                   <textarea
                     ref={textareaRef}
@@ -1206,23 +1305,33 @@ const Messaging: React.FC<MessagingProps> = ({
                     onChange={(e) => handleInputChange(e.target.value)}
                     onKeyDown={handleKeyDown}
                     rows={1}
-                    className="w-full text-xs rounded-xl border border-gray-200 bg-white py-2 pl-3 pr-9 resize-none focus:border-care-orange focus:ring-0"
+                    className={`w-full text-xs rounded-xl border bg-white py-2 pl-3 pr-9 resize-none focus:ring-0 ${
+                      smsMode
+                        ? 'border-emerald-300 focus:border-emerald-500'
+                        : 'border-gray-200 focus:border-care-orange'
+                    }`}
                     placeholder={
-                      activeGroup
-                        ? `Message ${activeGroup.name}... use @ to mention`
-                        : activeProjectId
-                          ? 'Message about this project... use @ to mention someone'
-                          : 'Type a message... use @ to mention someone'
+                      smsMode
+                        ? `SMS to ${activeChat?.name}...`
+                        : activeGroup
+                          ? `Message ${activeGroup.name}... use @ to mention`
+                          : activeProjectId
+                            ? 'Message about this project... use @ to mention someone'
+                            : 'Type a message... use @ to mention someone'
                     }
                   />
                   <span className="absolute right-2 bottom-2 text-gray-400">
-                    <AtSign size={14} />
+                    {smsMode ? <Smartphone size={14} className="text-emerald-500" /> : <AtSign size={14} />}
                   </span>
                 </div>
                 <button
                   onClick={handleSend}
                   disabled={!inputText.trim() || sending || (!activeChat && !activeGroup)}
-                  className="h-9 w-9 rounded-full bg-care-orange flex items-center justify-center text-white disabled:opacity-50 disabled:cursor-not-allowed shadow-md shadow-care-orange/40 hover:shadow-care-orange/60 transition-all"
+                  className={`h-9 w-9 rounded-full flex items-center justify-center text-white disabled:opacity-50 disabled:cursor-not-allowed shadow-md transition-all ${
+                    smsMode
+                      ? 'bg-emerald-500 shadow-emerald-500/40 hover:shadow-emerald-500/60'
+                      : 'bg-care-orange shadow-care-orange/40 hover:shadow-care-orange/60'
+                  }`}
                 >
                   <Send size={14} />
                 </button>

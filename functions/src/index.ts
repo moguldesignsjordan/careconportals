@@ -459,3 +459,6 @@ export { receiveSms, receiveMms } from "./twilio/receiveSms";
 
 // Twilio Status Callback + Conversation Stats
 export { smsStatusCallback, getConversationStats } from "./twilio/statusCallback";
+
+// Twilio Call Recordings + Transcriptions
+export { getCallRecordings, getRecordingAudio, requestTranscription } from "./twilio/callRecordings";

@@ -158,6 +158,25 @@ export interface ConversationStats {
   pending: number;
 }
 
+// Call recording
+export interface CallRecording {
+  sid: string;
+  callSid: string;
+  duration: string;
+  dateCreated: string;
+  status: string;
+  channels: number;
+  source: string;
+  mediaUrl: string;
+  transcriptionText: string | null;
+  transcriptionStatus: string | null;
+}
+
+export interface CallRecordingsResponse {
+  recordings: CallRecording[];
+  hasRecordings: boolean;
+}
+
 // ============ CLOUD FUNCTION REFS ============
 
 const sendSmsFn = httpsCallable<SendSmsRequest, SendSmsResult>(functions, 'sendSms');
@@ -186,6 +205,22 @@ const getConversationStatsFn = httpsCallable<
   { conversationId: string },
   ConversationStats
 >(functions, 'getConversationStats');
+
+// Call recordings
+const getCallRecordingsFn = httpsCallable<
+  { callSid: string },
+  CallRecordingsResponse
+>(functions, 'getCallRecordings');
+
+const getRecordingAudioFn = httpsCallable<
+  { recordingSid: string },
+  { audio: string; duration: string | null }
+>(functions, 'getRecordingAudio');
+
+const requestTranscriptionFn = httpsCallable<
+  { recordingSid: string },
+  { success: boolean; transcriptionSid: string; status: string }
+>(functions, 'requestTranscription');
 
 // ============ CONVERSATIONAL SMS ============
 
@@ -290,6 +325,56 @@ export async function fetchConversationStats(
 ): Promise<ConversationStats> {
   const result = await getConversationStatsFn({ conversationId });
   return result.data;
+}
+
+// ============ CALL RECORDINGS & TRANSCRIPTIONS ============
+
+/**
+ * Fetch recordings for a specific call.
+ * Returns recording metadata, media URLs, and any transcription text.
+ */
+export async function fetchCallRecordings(
+  callSid: string
+): Promise<CallRecordingsResponse> {
+  try {
+    const result = await getCallRecordingsFn({ callSid });
+    return result.data;
+  } catch (error: any) {
+    console.error('[Twilio] fetchCallRecordings failed:', error);
+    throw new Error(error?.message || 'Failed to fetch recordings');
+  }
+}
+
+/**
+ * Fetch the audio for a recording as a base64 data URI.
+ * Returns a string that can be used directly as an <audio> src.
+ */
+export async function fetchRecordingAudio(
+  recordingSid: string
+): Promise<string> {
+  try {
+    const result = await getRecordingAudioFn({ recordingSid });
+    return result.data.audio;
+  } catch (error: any) {
+    console.error('[Twilio] fetchRecordingAudio failed:', error);
+    throw new Error(error?.message || 'Failed to fetch audio');
+  }
+}
+
+/**
+ * Request Twilio to transcribe an existing recording.
+ * Returns immediately — transcription happens async on Twilio's side.
+ */
+export async function requestRecordingTranscription(
+  recordingSid: string
+): Promise<{ transcriptionSid: string; status: string }> {
+  try {
+    const result = await requestTranscriptionFn({ recordingSid });
+    return result.data;
+  } catch (error: any) {
+    console.error('[Twilio] requestTranscription failed:', error);
+    throw new Error(error?.message || 'Failed to request transcription');
+  }
 }
 
 // ============ REAL-TIME LISTENERS (Firestore) ============
